@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# emma-local — manage the LOCAL BACKUP instance of Emma (runit / Void Linux).
+#
+# The Hugging Face Space is the primary. Telegram allows only ONE poller per
+# bot token, and both sides push database snapshots to the same HF Dataset,
+# so the Space must be PAUSED while the local instance runs — otherwise the
+# Space's periodic backup will overwrite yours (last writer wins).
+#
+#   emma-local start [--force]  pull latest DB snapshot, start the service
+#   emma-local stop             stop the service, push DBs back to the Dataset
+#   emma-local status           runit + HTTP health
+#
+# NOTE: the local instance does NOT back up continuously — only `stop` pushes.
+# A power cut while running locally loses changes since `start`; that's the
+# accepted trade-off for a manual failover instance.
+#
+# Requires in /home/void/AI/emma/.env: HF_TOKEN, EMMA_HF_BACKUP_REPO
+# (and EMMA_SPACE_URL for the safety probe, e.g. https://user-emma.hf.space)
+set -euo pipefail
+
+EMMA_DIR=/home/void/AI/emma
+PY="$EMMA_DIR/.venv/bin/python"
+
+env_get() { # env_get KEY — read one value from .env without sourcing it
+    sed -n "s/^$1=//p" "$EMMA_DIR/.env" 2>/dev/null | tail -1
+}
+
+load_env() {
+    HF_TOKEN=$(env_get HF_TOKEN)
+    EMMA_HF_BACKUP_REPO=$(env_get EMMA_HF_BACKUP_REPO)
+    EMMA_SPACE_URL=$(env_get EMMA_SPACE_URL)
+    export HF_TOKEN EMMA_HF_BACKUP_REPO
+}
+
+sync_db() { # sync_db restore|upload
+    if [ -z "${HF_TOKEN:-}" ] || [ -z "${EMMA_HF_BACKUP_REPO:-}" ]; then
+        echo "! HF_TOKEN / EMMA_HF_BACKUP_REPO not set in .env — skipping DB sync"
+        return 0
+    fi
+    if [ "$1" = restore ]; then
+        # rm the sentinel so restore actually runs (it's once-per-boot otherwise)
+        rm -f "$EMMA_DIR/data/.restored"
+        (cd "$EMMA_DIR" && "$PY" -c "from core.persistence import hf_backup; hf_backup.restore()")
+    else
+        (cd "$EMMA_DIR" && "$PY" -c "import asyncio; from core.persistence import hf_backup; asyncio.run(hf_backup.upload(force=True))")
+    fi
+}
+
+case "${1:-}" in
+    start)
+        load_env
+        if [ "${2:-}" != "--force" ] && [ -n "${EMMA_SPACE_URL:-}" ]; then
+            if curl -fsS -m 10 "$EMMA_SPACE_URL/" >/dev/null 2>&1; then
+                echo "✗ The HF Space at $EMMA_SPACE_URL is still UP." >&2
+                echo "  Pause it first (Space settings → Pause), or re-run with --force." >&2
+                exit 1
+            fi
+        fi
+        sync_db restore
+        sudo sv up emma
+        echo "Emma local started: http://localhost:8000/ui/"
+        ;;
+    stop)
+        load_env
+        # -w 30: wait for the process to actually exit so its final writes
+        # land before we snapshot and push.
+        sudo sv -w 30 down emma
+        sync_db upload
+        echo "Emma local stopped; databases pushed. Unpause the Space now."
+        ;;
+    status)
+        sudo sv status emma 2>/dev/null \
+            || echo "runit service not reachable (not installed, or sv needs sudo)"
+        curl -fsS -m 5 http://localhost:8000/status && echo || echo "HTTP: not responding"
+        ;;
+    *)
+        echo "usage: emma-local {start [--force]|stop|status}" >&2
+        exit 1
+        ;;
+esac

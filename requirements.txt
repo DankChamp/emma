@@ -1,0 +1,21 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+pydantic-settings>=2.4
+httpx>=0.27
+apscheduler>=3.10
+
+# --- Desktop GUI (gui/) ---
+PySide6>=6.7
+requests>=2.32
+
+# --- Voice (voice/) - wake word + offline speech, see the Voice section of README.md ---
+# All optional: only needed if you're running emma_voice.py.
+vosk>=0.3.45          # offline speech recognition (wake word + command STT)
+sounddevice>=0.4.6    # microphone capture + speaker playback
+numpy>=1.26           # audio buffer math
+piper-tts>=1.4        # natural neural feminine voice (offline, CPU) - preferred TTS
+pyttsx3>=2.90         # fallback text-to-speech (SAPI5 / NSSpeech / espeak-ng)
+
+# --- Telegram notification bot (notifications/) ---
+python-telegram-bot>=22.8

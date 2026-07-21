@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Thin wrapper so you can type `./emma task list` instead of
+# `.venv/bin/python emma_cli.py task list`.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -x "$DIR/.venv/bin/python" ]; then
+    exec "$DIR/.venv/bin/python" "$DIR/emma_cli.py" "$@"
+else
+    exec python3 "$DIR/emma_cli.py" "$@"
+fi

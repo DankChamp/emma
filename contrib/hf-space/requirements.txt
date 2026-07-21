@@ -1,0 +1,10 @@
+# Installed by the Space on top of the gradio runtime (gradio itself comes
+# from the sdk_version in README.md — don't list it here).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+pydantic-settings>=2.4
+httpx>=0.27
+apscheduler>=3.10
+python-telegram-bot>=22.8
+huggingface_hub>=0.24

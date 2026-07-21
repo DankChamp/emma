@@ -1,0 +1,36 @@
+# Secrets
+.env
+
+# Database files (backed up to HF Dataset, not git)
+data/*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Voice models
+vosk-model-*/
+voice/models/
+vosk-model-en-us-0.22-lgraph.zip
+
+# Large binaries
+smol.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deploy temp
+__deploy_tmp/
+__deploy_db/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/

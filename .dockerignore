@@ -1,0 +1,12 @@
+.venv
+**/__pycache__
+**/*.pyc
+.env
+data
+vosk-model-*
+*.zip
+voice
+gui
+emma_voice.py
+emma_cli.py
+.claude

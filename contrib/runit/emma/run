@@ -1,0 +1,23 @@
+#!/bin/sh
+# runit service for Emma, for Void Linux (runit, not systemd).
+#
+# Install (as root, or via sudo):
+#   ln -s /home/void/AI/emma/contrib/runit/emma /var/service/emma
+#
+# BACKUP ROLE: the Hugging Face Space is the primary instance. To keep this
+# service installed but NOT auto-started at boot, create a "down" file first:
+#   touch /home/void/AI/emma/contrib/runit/emma/down
+# Then control it with:
+#   sudo sv up emma      # start (prefer `emma-local start` — it syncs DBs too)
+#   sudo sv down emma    # stop
+#   sv status emma
+#
+# runit supervises the process: if uvicorn crashes, it is restarted
+# automatically within a second (the "keep-alive loop").
+EMMA_DIR="/home/void/AI/emma"
+
+exec 2>&1
+cd "$EMMA_DIR" || exit 1
+# HOME must point at void's home or huggingface_hub's cache lands in /root.
+exec chpst -u void:void env HOME=/home/void USER=void \
+    "$EMMA_DIR/.venv/bin/uvicorn" main:app --host 0.0.0.0 --port 8000

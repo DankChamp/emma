@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emma</title>
+<style>
+:root {
+  --bg: #0b0c10;
+  --bg-elevated: #131620;
+  --bg-input: #1a1e2b;
+  --border: #262b3d;
+  --text: #e6e8f0;
+  --text-dim: #8a8fa3;
+  --accent: #8b5cf6;
+  --accent-hover: #a78bfa;
+  --accent-dim: #4c3a80;
+  --ok: #2dd4bf;
+  --warn: #f59e0b;
+  --err: #f43f5e;
+  --font: 'Inter', 'Segoe UI', 'Ubuntu', sans-serif;
+  --mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); display: flex; height: 100vh; overflow: hidden; }
+
+/* Sidebar */
+.sidebar {
+  width: 220px; min-width: 220px; background: var(--bg-elevated);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+}
+.brand {
+  font-family: var(--mono); font-size: 20px; font-weight: 600;
+  padding: 18px 16px 4px; color: var(--text);
+}
+.brand-sub {
+  font-family: var(--mono); font-size: 11px; color: var(--accent);
+  padding: 0 16px 16px; letter-spacing: 1px;
+}
+.nav { list-style: none; padding: 8px; flex: 1; overflow-y: auto; }
+.nav li {
+  padding: 10px 12px; border-radius: 8px; margin-bottom: 2px;
+  color: var(--text-dim); cursor: pointer; font-size: 14px;
+  transition: none;
+}
+.nav li:hover { background: var(--bg-input); color: var(--text); }
+.nav li.active { background: var(--accent-dim); color: var(--text); }
+
+/* Main */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.page { display: none; padding: 20px; overflow-y: auto; height: 100%; }
+.page.active { display: flex; flex-direction: column; }
+.page-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+
+/* Cards */
+.card {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; margin-bottom: 12px;
+}
+
+/* Form elements */
+input, textarea, select {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; font-size: 13px;
+  color: var(--text); font-family: var(--font);
+}
+input:focus, textarea:focus, select:focus { border-color: var(--accent); outline: none; }
+textarea { resize: vertical; }
+::placeholder { color: var(--text-dim); opacity: 0.6; }
+
+button {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 500;
+  color: var(--text); cursor: pointer; transition: none;
+}
+button:hover { border-color: var(--accent); color: var(--accent-hover); }
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.danger { border-color: var(--err); color: var(--err); }
+button.danger:hover { background: var(--err); color: #fff; }
+button.ok { border-color: var(--ok); color: var(--ok); }
+button.ok:hover { background: var(--ok); color: #fff; }
+
+/* Tables */
+table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+th { background: var(--bg-input); color: var(--text-dim); padding: 8px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+
+/* Chat */
+.chat-log {
+  flex: 1; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px; font-size: 14px;
+  overflow-y: auto; min-height: 200px; max-height: 400px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+/* Utility */
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.grow { flex: 1; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.gap-4 { gap: 4px; }
+.mt-8 { margin-top: 8px; }
+.mb-8 { margin-bottom: 8px; }
+.flex-1 { flex: 1; }
+.text-dim { color: var(--text-dim); font-size: 12px; }
+.text-mono { font-family: var(--mono); }
+.text-sm { font-size: 12px; }
+.online { color: var(--ok); }
+.offline { color: var(--err); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+.badge-ok { background: var(--ok); color: #000; }
+.badge-warn { background: var(--warn); color: #000; }
+.badge-err { background: var(--err); color: #fff; }
+
+pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+
+.section-title { font-size: 13px; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; padding: 4px 2px; margin-bottom: 8px; }
+
+/* Tab buttons (memory tabs) */
+.tab-btn {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 14px; font-size: 12px; font-weight: 500;
+  color: var(--text-dim); cursor: pointer;
+}
+.tab-btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.tab-btn.active { background: var(--accent-dim); color: var(--text); border-color: var(--accent-dim); }
+
+/* Memory project list */
+.proj-item {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-elevated); cursor: pointer; font-size: 13px;
+  display: flex; align-items: center; gap: 6px;
+}
+.proj-item:hover { border-color: var(--accent); }
+.proj-item.selected { background: var(--accent-dim); border-color: var(--accent-dim); }
+.proj-item .proj-meta { margin-left: auto; color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.proj-item .proj-star { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="brand">EMMA</div>
+  <div class="brand-sub">PERSONAL OS // VOID</div>
+  <ul class="nav" id="nav">
+    <li class="active" data-page="chat">Talk</li>
+    <li data-page="voice">Voice</li>
+    <li data-page="tasks">Tasks &amp; Reminders</li>
+    <li data-page="providers">Providers &amp; Keys</li>
+    <li data-page="memory">Memory</li>
+    <li data-page="schedule">Schedule</li>
+    <li data-page="notifications-busy">Notifications &amp; Busy Mode</li>
+    <li data-page="selfcare">Self-Care</li>
+  </ul>
+</div>
+
+<div class="main">
+  <!-- ===== CHAT ===== -->
+  <div class="page active" id="page-chat">
+    <div class="page-title">Talk</div>
+    <div class="row mb-8">
+      <span class="text-dim">Session:</span>
+      <input id="chat-session" value="default" style="width:120px">
+      <span class="text-dim">Task:</span>
+      <select id="chat-task">
+        <option>conversation</option><option>coding</option><option>reasoning</option><option>creative</option><option>general</option>
+      </select>
+      <label><input type="checkbox" id="chat-manual"> Manual mode</label>
+      <select id="chat-provider" disabled>
+        <option>ollama</option><option>local_generic</option><option>groq</option><option>nvidia_nim</option>
+      </select>
+      <input id="chat-model" placeholder="model" disabled style="width:200px">
+    </div>
+    <div class="chat-log" id="chat-log"></div>
+    <div id="chat-status" class="text-dim text-sm mt-8"></div>
+    <div class="row mt-8">
+      <textarea id="chat-input" placeholder="Talk to Emma... (Enter to send, Shift+Enter for newline)" style="flex:1;height:60px"></textarea>
+      <div class="col gap-4">
+        <button id="chat-send" class="primary">Send</button>
+        <button id="chat-interrupt" disabled>Interrupt</button>
+        <button id="chat-clear">Clear</button>
+      </div>
+    </div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;color:var(--text-dim);font-size:12px">Identity & System Prompt</summary>
+      <div class="card mt-8">
+        <p class="text-dim text-sm mb-8">Emma's system prompt: who she is, who you are, her purpose. Sent to every model so she stays in character.</p>
+        <textarea id="chat-persona" style="width:100%;height:100px" placeholder="You are Emma, a helpful AI personal assistant..."></textarea>
+        <div class="row mt-8">
+          <button id="chat-persona-save">Save Identity</button>
+          <span id="chat-persona-status" class="text-sm"></span>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- ===== VOICE ===== -->
+  <div class="page" id="page-voice">
+    <div class="page-title">Voice</div>
+    <p class="text-dim text-sm mb-8">Runs emma_voice.py as a background process. Say the wake word, then your command - Emma answers out loud.</p>
+    <div class="row mb-8">
+      <span class="text-dim">Wake word:</span>
+      <input id="voice-wakeword" value="hey emma" style="width:200px">
+      <button id="voice-start" class="ok">Start Listening</button>
+      <button id="voice-stop" class="danger" disabled>Stop</button>
+    </div>
+    <div id="voice-status" class="text-dim text-sm mb-8">Not running.</div>
+    <pre id="voice-log" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:12px;flex:1;overflow-y:auto;font-size:12px;min-height:200px"></pre>
+  </div>
+
+  <!-- ===== TASKS & REMINDERS ===== -->
+  <div class="page" id="page-tasks">
+    <div class="row mb-8">
+      <div class="page-title" style="margin:0;flex:1">Tasks &amp; Reminders</div>
+      <span id="task-counts" class="text-dim text-sm"></span>
+      <button id="tasks-refresh">Refresh</button>
+    </div>
+
+    <div class="card mb-8">
+      <div class="row">
+        <button id="brief-morning">☀ Morning Brief</button>
+        <button id="brief-night">☾ Night Review</button>
+        <span id="brief-status" class="text-dim text-sm"></span>
+      </div>
+      <p id="brief-text" class="text-sm" style="display:none;margin-top:8px;line-height:1.5"></p>
+    </div>
+
+    <p class="section-title">Tasks</p>
+    <div class="row mb-8">
+      <input id="task-new-title" placeholder="What needs doing?" style="flex:2" >
+      <input id="task-new-project" placeholder="project (optional)" style="width:140px">
+      <select id="task-new-priority" style="width:90px">
+        <option value="medium" selected>medium</option><option value="high">high</option><option value="low">low</option>
+      </select>
+      <input id="task-new-deadline" type="date" style="width:140px" title="deadline (optional)">
+      <button id="task-add" class="primary">Add</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;min-height:120px">
+      <table>
+        <thead><tr><th style="width:30px"></th><th>Task</th><th>Project</th><th>Priority</th><th>Deadline</th><th style="width:60px"></th></tr></thead>
+        <tbody id="task-table"></tbody>
+      </table>
+    </div>
+    <div class="row mt-8 mb-8">
+      <label class="text-sm text-dim"><input type="checkbox" id="task-show-done"> Show completed</label>
+      <button id="task-clear-done" style="font-size:12px;padding:4px 10px">Clear completed</button>
+      <span id="task-status" class="text-sm"></span>
+    </div>
+
+    <p class="section-title">Reminders</p>
+    <div class="row mb-8">
+      <input id="rem-new-message" placeholder="Remind me to..." style="flex:2">
+      <input id="rem-new-time" type="datetime-local" style="width:190px" title="at a specific time">
+      <span class="text-dim text-sm">or in</span>
+      <input id="rem-new-minutes" type="number" min="1" placeholder="min" style="width:70px" title="minutes from now">
+      <select id="rem-new-repeat" style="width:90px">
+        <option value="none" selected>once</option><option value="daily">daily</option><option value="weekly">weekly</option>
+      </select>
+      <label class="text-sm text-dim" title="keeps re-firing every few minutes until dismissed"><input type="checkbox" id="rem-new-persistent"> nag</label>
+      <label class="text-sm text-dim" title="delivered even in busy mode"><input type="checkbox" id="rem-new-important"> important</label>
+      <button id="rem-add" class="primary">Add</button>
+    </div>
+    <div style="max-height:220px;overflow-y:auto">
+      <table>
+        <thead><tr><th>When</th><th>Message</th><th>Repeat</th><th>Flags</th><th style="width:110px"></th></tr></thead>
+        <tbody id="rem-table"></tbody>
+      </table>
+    </div>
+    <div class="row mt-8"><span id="rem-status" class="text-sm"></span></div>
+  </div>
+
+  <!-- ===== PROVIDERS ===== -->
+  <div class="page" id="page-providers">
+    <div class="row mb-8">
+      <div class="page-title" style="margin:0;flex:1">Providers & API Keys</div>
+      <button id="providers-refresh">Refresh Status</button>
+    </div>
+    <div id="providers-list"></div>
+  </div>
+
+  <!-- ===== MEMORY ===== -->
+  <div class="page" id="page-memory">
+    <div class="row mb-8">
+      <div class="page-title" style="margin:0;flex:1">Memory</div>
+      <span id="mem-overview" class="text-dim text-sm"></span>
+      <button id="mem-refresh">Refresh</button>
+    </div>
+    <div class="row mb-8">
+      <button class="tab-btn active" data-tab="mem-longterm">Long-term</button>
+      <button class="tab-btn" data-tab="mem-project">Projects</button>
+      <button class="tab-btn" data-tab="mem-daily">Daily</button>
+      <button class="tab-btn" data-tab="mem-sessions">Conversations</button>
+    </div>
+    <div id="mem-longterm" class="mem-tab">
+      <p class="text-dim text-sm mb-8">Facts Emma keeps forever — people, preferences, habits. Injected into every chat as background knowledge. (Her identity/system prompt lives under Talk → Identity.)</p>
+      <textarea id="mem-longterm-editor" style="width:100%;flex:1;min-height:200px" placeholder="- My coding partner is ...&#10;- I prefer metric units&#10;- I study best late at night"></textarea>
+      <div class="row mt-8">
+        <button id="mem-longterm-save" class="primary">Save</button>
+        <span id="mem-longterm-status" class="text-sm"></span>
+      </div>
+    </div>
+    <div id="mem-project" class="mem-tab" style="display:none">
+      <div style="display:flex;gap:12px;flex:1;min-height:0">
+        <div style="width:260px;min-width:260px;display:flex;flex-direction:column;gap:8px">
+          <div class="row">
+            <input id="mem-project-new-name" placeholder="new project name" style="flex:1">
+            <button id="mem-project-create">+ New</button>
+          </div>
+          <div id="mem-project-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div class="row mb-8">
+            <strong id="mem-project-title" style="font-size:14px">No project selected</strong>
+            <span style="flex:1"></span>
+            <button id="mem-project-focus" title="Emma carries the focused project's notes into every chat">☆ Focus</button>
+            <button id="mem-project-rename">Rename</button>
+            <button id="mem-project-delete" class="danger">Delete</button>
+          </div>
+          <p class="text-dim text-sm mb-8">Freeform notes Emma remembers about this project. The <b>focused</b> project (★) is injected into chat context.</p>
+          <textarea id="mem-project-editor" style="width:100%;flex:1;min-height:200px" placeholder="Select or create a project on the left." disabled></textarea>
+          <div class="row mt-8">
+            <button id="mem-project-save" class="primary" disabled>Save</button>
+            <span id="mem-project-status" class="text-sm"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="mem-daily" class="mem-tab" style="display:none">
+      <p class="text-dim text-sm mb-8">Scratchpad for <span id="mem-daily-date" class="text-mono"></span>. Emma reads this as today's context; it rolls over each morning.</p>
+      <textarea id="mem-daily-editor" style="width:100%;flex:1;min-height:200px" placeholder="What matters today — deadlines, errands, things to not forget."></textarea>
+      <div class="row mt-8">
+        <button id="mem-daily-save" class="primary">Save</button>
+        <span id="mem-daily-status" class="text-sm"></span>
+      </div>
+    </div>
+    <div id="mem-sessions" class="mem-tab" style="display:none">
+      <p class="text-dim text-sm mb-8">Chat sessions Emma has short-term memory of. Clearing one erases its conversation history (long-term and project memory are untouched).</p>
+      <div style="flex:1;overflow-y:auto">
+        <table>
+          <thead><tr><th>Session</th><th>Turns</th><th>Last activity</th><th></th></tr></thead>
+          <tbody id="mem-sessions-table"></tbody>
+        </table>
+      </div>
+      <div class="row mt-8"><span id="mem-sessions-status" class="text-sm"></span></div>
+    </div>
+  </div>
+
+  <!-- ===== SCHEDULE ===== -->
+  <div class="page" id="page-schedule">
+    <div class="page-title">Schedule</div>
+
+    <div class="row mb-8">
+      <span class="text-dim">Date:</span>
+      <input id="sch-date" type="date" style="width:160px">
+      <strong id="sch-status" style="font-size:14px">● Free</strong>
+    </div>
+
+    <div class="card mb-8">
+      <p class="text-dim text-sm mb-8">Describe your day — AI generates the timetable:</p>
+      <textarea id="sch-text" placeholder="e.g. Meeting at 10am, lunch at noon, gym at 3pm, work on project until 5pm" style="width:100%;min-height:70px"></textarea>
+      <button id="sch-generate" class="primary mt-8">Generate Schedule</button>
+    </div>
+
+    <div style="flex:1;overflow-y:auto">
+      <table>
+        <thead><tr><th>Start</th><th>End</th><th>Title</th><th>Busy</th><th>Notify</th><th></th></tr></thead>
+        <tbody id="sch-table"></tbody>
+      </table>
+    </div>
+
+    <div class="row mt-8">
+      <button id="sch-add">Add Block</button>
+      <button id="sch-delete" class="danger">Delete Block</button>
+      <span style="flex:1"></span>
+      <button id="sch-save" class="primary">Save</button>
+      <button id="sch-refresh">Refresh</button>
+    </div>
+
+    <hr style="border-color:var(--border);margin:16px 0">
+
+    <div class="row">
+      <span class="text-dim">Set yourself as owner (for notifications):</span>
+      <select id="sch-owner-select" style="min-width:200px"></select>
+      <button id="sch-set-owner">Set as Owner</button>
+    </div>
+  </div>
+
+  <!-- ===== NOTIFICATIONS & BUSY MODE ===== -->
+  <div class="page" id="page-notifications-busy">
+    <div class="page-title">Notifications &amp; Busy Mode</div>
+
+    <strong id="nb-state" style="font-size:14px">Checking status...</strong>
+    <div class="row mb-8 mt-8">
+      <input id="nb-note" placeholder="optional note, e.g. 'coding session'" style="flex:1">
+      <button id="nb-busy" class="ok">I'm Busy</button>
+      <button id="nb-free" class="danger">I'm Free</button>
+    </div>
+
+    <div class="row mb-8">
+      <span id="nb-bot-status" class="text-dim">Bot: checking...</span>
+      <button id="nb-bot-start" class="ok">Start Bot</button>
+      <button id="nb-bot-stop" class="danger" disabled>Stop Bot</button>
+    </div>
+
+    <p class="text-dim text-sm mb-8">People who message your bot are registered below. Select someone to set their priority, custom message, or write a prompt explaining who they are.</p>
+    <div style="flex:1;overflow-y:auto">
+      <table>
+        <thead><tr><th></th><th>Name</th><th>Priority</th><th>Notify</th></tr></thead>
+        <tbody id="nb-user-table"></tbody>
+      </table>
+    </div>
+
+    <div class="row mt-8">
+      <span class="text-dim">Priority:</span>
+      <select id="nb-priority"><option>normal</option><option>high</option><option>low</option></select>
+      <label><input type="checkbox" id="nb-notify"> Notify on busy/free</label>
+      <span class="text-dim">Message:</span>
+      <input id="nb-message" placeholder="e.g. 'Busy with work — will reply later'" style="flex:1">
+    </div>
+
+    <p class="text-dim text-sm mt-8">Prompt — who this person is to you:</p>
+    <textarea id="nb-prompt" placeholder="e.g. Alex is my boss at work, been my manager for 3 years." style="width:100%;min-height:60px"></textarea>
+
+    <div class="row mt-8">
+      <button id="nb-save" class="primary">Save Changes</button>
+      <button id="nb-refresh">Refresh</button>
+    </div>
+  </div>
+
+  <!-- ===== SELF-CARE ===== -->
+  <div class="page" id="page-selfcare">
+    <div class="page-title">Self-Care & Diagnostics</div>
+    <div class="card mb-8">
+      <div class="row">
+        <span id="selfcare-version" class="text-mono text-sm">Loading version info...</span>
+        <button id="selfcare-refresh-version">Refresh Info</button>
+      </div>
+    </div>
+    <div class="row mb-8">
+      <button id="selfcare-diag" style="border-color:var(--accent);color:var(--accent-hover)">Run Diagnostics</button>
+      <button id="selfcare-repair" class="ok">Auto-Repair</button>
+      <button id="selfcare-check-updates">Check for Updates</button>
+      <button id="selfcare-apply-updates" disabled>Apply Updates</button>
+      <button id="selfcare-deps">Update Dependencies</button>
+    </div>
+    <p class="section-title">Diagnostics & Execution Log</p>
+    <pre id="selfcare-log" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:12px;flex:1;overflow-y:auto;font-size:12px;min-height:200px"></pre>
+    <p class="section-title mt-8">Recent Changelog</p>
+    <div style="max-height:200px;overflow-y:auto">
+      <table>
+        <thead><tr><th>Hash</th><th>Date</th><th>Author</th><th>Message</th></tr></thead>
+        <tbody id="selfcare-changelog-table"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// Must be accessed via HTTP server, not file://
+if (location.protocol === 'file:') {
+  document.body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0b0c10;color:#e6e8f0;font-family:sans-serif;flex-direction:column;gap:16px">
+      <h1 style="color:#f43f5e">Emma Web UI</h1>
+      <p style="color:#8a8fa3;font-size:14px">Open this page through the Emma API server:</p>
+      <code style="background:#1a1e2b;padding:8px 16px;border-radius:8px;border:1px solid #262b3d;font-size:13px">http://localhost:8000/ui/</code>
+      <p style="color:#8a8fa3;font-size:12px">Make sure the backend is running: <code style="background:#1a1e2b;padding:2px 6px;border-radius:4px">uvicorn main:app --reload</code></p>
+    </div>`;
+  throw new Error('Page must be accessed through HTTP server, not file://');
+}
+
+const API = '';
+
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  try {
+    const r = await fetch(API + path, opts);
+    if (!r.ok) { const e = await r.json().catch(() => ({detail: r.statusText})); throw new Error(e.detail || r.statusText); }
+    return await r.json();
+  } catch (e) {
+    if (e instanceof TypeError && e.message.includes('fetch')) {
+      throw new Error('Cannot reach Emma API server at http://localhost:8000');
+    }
+    throw e;
+  }
+}
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function showStatus(el, msg, color) {
+  el.textContent = msg;
+  if (color) {
+    if (color.startsWith('var(')) {
+      const name = color.slice(4, -1).trim();
+      el.style.color = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    } else {
+      el.style.color = color;
+    }
+  }
+}
+
+// Navigation
+document.querySelectorAll('.nav li').forEach(li => {
+  li.addEventListener('click', () => {
+    document.querySelectorAll('.nav li').forEach(l => l.classList.remove('active'));
+    li.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + li.dataset.page).classList.add('active');
+  });
+});
+
+// ==================== CHAT ====================
+const chatLog = document.getElementById('chat-log');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+const chatInterrupt = document.getElementById('chat-interrupt');
+const chatStatus = document.getElementById('chat-status');
+const chatManual = document.getElementById('chat-manual');
+const chatProvider = document.getElementById('chat-provider');
+const chatModel = document.getElementById('chat-model');
+const chatPersona = document.getElementById('chat-persona');
+const chatPersonaStatus = document.getElementById('chat-persona-status');
+
+let abortController = null;
+
+function appendChat(type, html) {
+  chatLog.innerHTML += `<p style="margin:6px 0">${html}</p>`;
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+chatManual.addEventListener('change', () => {
+  chatProvider.disabled = !chatManual.checked;
+  chatModel.disabled = !chatManual.checked;
+});
+
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend.click(); }
+});
+
+chatSend.addEventListener('click', async () => {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  chatInput.value = '';
+  appendChat('user', `<b style="color:var(--accent-hover)">You</b><br>${escapeHtml(msg).replace(/\n/g, '<br>')}`);
+  chatStatus.textContent = 'Emma is thinking...';
+  chatSend.disabled = true; chatInterrupt.disabled = false;
+
+  const body = {
+    message: msg,
+    session_id: document.getElementById('chat-session').value || 'default',
+    task_type: document.getElementById('chat-task').value,
+  };
+  if (chatManual.checked) { body.provider = chatProvider.value; body.model = chatModel.value || null; }
+  const persona = chatPersona.value.trim();
+  if (persona) body.system = persona;
+
+  abortController = new AbortController();
+  try {
+    const r = await fetch(API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: abortController.signal,
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({detail: r.statusText}))).detail || r.statusText);
+    const data = await r.json();
+    appendChat('assistant', `<b style="color:var(--ok)">Emma</b> <span style="color:var(--text-dim);font-size:11px">(${escapeHtml(data.provider)} / ${escapeHtml(data.model)})</span><br>${escapeHtml(data.reply).replace(/\n/g, '<br>')}`);
+    chatStatus.textContent = `Last reply via ${data.provider} / ${data.model} at ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    if (e.name === 'AbortError') { appendChat('system', `<span style="color:var(--text-dim);font-size:12px">⏹ Emma was interrupted.</span>`); }
+    else { appendChat('system', `<span style="color:var(--err)">⚠ ${escapeHtml(e.message)}</span>`); }
+    chatStatus.textContent = 'Something went wrong.';
+  }
+  chatSend.disabled = false; chatInterrupt.disabled = true;
+  abortController = null;
+});
+
+chatInterrupt.addEventListener('click', () => { if (abortController) abortController.abort(); });
+
+document.getElementById('chat-persona-save').addEventListener('click', async () => {
+  const text = chatPersona.value.trim();
+  await api('POST', '/memory/persona', { text });
+  showStatus(chatPersonaStatus, '✓ Identity saved', 'var(--ok)');
+});
+
+async function loadPersona() {
+  try { const d = await api('GET', '/memory/persona'); chatPersona.value = d.text || ''; } catch {}
+}
+loadPersona();
+
+// Replay the current session's saved conversation so it survives a refresh.
+async function loadHistory() {
+  const session = document.getElementById('chat-session').value || 'default';
+  try {
+    const turns = await api('GET', '/chat/history/' + encodeURIComponent(session));
+    chatLog.innerHTML = '';
+    for (const t of turns) {
+      const body = escapeHtml(t.content).replace(/\n/g, '<br>');
+      if (t.role === 'user') appendChat('user', `<b style="color:var(--accent-hover)">You</b><br>${body}`);
+      else appendChat('assistant', `<b style="color:var(--ok)">Emma</b><br>${body}`);
+    }
+  } catch {}
+}
+loadHistory();
+document.getElementById('chat-session').addEventListener('change', loadHistory);
+
+document.getElementById('chat-clear').addEventListener('click', () => {
+  chatLog.innerHTML = '';
+  chatStatus.textContent = 'Chat cleared. (History is still saved on the server per session.)';
+});
+
+// ==================== VOICE ====================
+const voiceLog = document.getElementById('voice-log');
+const voiceStatus = document.getElementById('voice-status');
+
+// Voice is a subprocess on the backend - we simulate the GUI's behavior
+// by showing instructions. The actual emma_voice.py runs on the server.
+document.getElementById('voice-start').addEventListener('click', () => {
+  voiceStatus.textContent = 'Start the voice assistant from the CLI: ./emma_voice.py --wake-word "hey emma"';
+  voiceStatus.style.color = '#2dd4bf';
+  document.getElementById('voice-start').disabled = true;
+  document.getElementById('voice-stop').disabled = false;
+  voiceLog.textContent += `[${new Date().toLocaleTimeString()}] Voice assistant started (listening for wake word)\n`;
+});
+document.getElementById('voice-stop').addEventListener('click', () => {
+  voiceStatus.textContent = 'Not running.';
+  voiceStatus.style.color = '';
+  document.getElementById('voice-start').disabled = false;
+  document.getElementById('voice-stop').disabled = true;
+  voiceLog.textContent += `[${new Date().toLocaleTimeString()}] Voice assistant stopped\n`;
+});
+
+// ==================== PROVIDERS ====================
+const providersList = document.getElementById('providers-list');
+
+const PROVIDER_LABELS = {
+  ollama: 'Ollama (Local)',
+  local_generic: 'Local Server (Any Model)',
+  groq: 'Groq (Cloud - fast)',
+  nvidia_nim: 'NVIDIA NIM (Cloud - coding/reasoning)',
+};
+const PROVIDER_HINTS = {
+  ollama: 'Runs on your local machine. No key needed - just make sure ollama serve is running.',
+  local_generic: 'Point this at ANY OpenAI-compatible server: LM Studio, llama.cpp, vLLM, etc.',
+  groq: 'Get a free key at console.groq.com/keys. Fast for conversation and general tasks.',
+  nvidia_nim: 'Get a key at build.nvidia.com. Emma prefers this for coding and deep reasoning.',
+};
+
+async function loadProviders() {
+  try {
+    const data = await api('GET', '/settings/providers');
+    providersList.innerHTML = '';
+    for (const p of data) {
+      const name = p.name;
+      const card = document.createElement('div');
+      card.className = 'card';
+      const hasUrl = name === 'ollama' || name === 'local_generic';
+      const hasKey = name !== 'ollama';
+      card.innerHTML = `
+        <div class="row mb-8">
+          <strong style="font-size:15px">${PROVIDER_LABELS[name] || name}</strong>
+          <span style="margin-left:auto"><span class="${p.available ? 'online' : 'offline'}">●</span> ${p.available ? 'online' : 'offline'}</span>
+        </div>
+        <p class="text-dim text-sm mb-8">${PROVIDER_HINTS[name] || ''}</p>
+        ${hasUrl ? `<div class="row mb-8 prov-url-row"><span class="text-dim">Base URL:</span><input class="prov-base-url" data-provider="${name}" placeholder="http://localhost:11434" style="flex:1"><button class="prov-save-url" data-provider="${name}">Save URL</button><span class="prov-url-status text-sm" style="color:var(--ok)"></span></div>` : ''}
+        ${hasKey ? `<div class="row mb-8"><span class="text-dim">API Key:</span><input class="prov-key" data-provider="${name}" type="password" placeholder="${name === 'local_generic' ? 'Optional' : 'Paste your API key'}" style="flex:1"><button class="prov-save-key" data-provider="${name}">Save Key</button><span class="prov-key-status text-sm" style="color:var(--ok)"></span></div>` : ''}
+        <div class="row">
+          <span class="text-dim">Default model:</span>
+          <input class="prov-model" data-provider="${name}" value="${p.default_model || ''}" style="flex:1">
+          <button class="prov-refresh-models" data-provider="${name}">Refresh Models</button>
+          <button class="prov-save-model" data-provider="${name}">Save Model</button>
+          <button class="prov-test" data-provider="${name}">Test Connection</button>
+          <span class="prov-test-status text-sm"></span>
+        </div>
+      `;
+      providersList.appendChild(card);
+    }
+  } catch (e) {
+    providersList.innerHTML = `<p class="text-dim" style="padding:16px">⚠ Failed to load providers: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+providersList.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const prov = btn.dataset.provider;
+  const row = btn.closest('.row');
+  if (!prov || !row) return;
+
+  if (btn.classList.contains('prov-save-key')) {
+    const input = row.querySelector('.prov-key');
+    const status = row.querySelector('.prov-key-status');
+    const key = input.value.trim();
+    if (!key) return;
+    try {
+      await api('POST', `/settings/providers/${prov}/key`, { api_key: key });
+      input.value = '';
+      status.textContent = '✓ saved';
+      status.style.color = '#2dd4bf';
+    } catch (e2) { status.textContent = `✗ ${e2.message}`; status.style.color = '#f43f5e'; }
+    return;
+  }
+
+  if (btn.classList.contains('prov-save-url')) {
+    const input = row.querySelector('.prov-base-url');
+    const status = row.querySelector('.prov-url-status');
+    const url = input.value.trim();
+    if (!url) return;
+    try {
+      if (prov === 'ollama') await api('POST', '/settings/ollama/base-url', { base_url: url });
+      else await api('POST', `/settings/providers/${prov}/base-url`, { base_url: url });
+      status.textContent = '✓ saved';
+      status.style.color = '#2dd4bf';
+    } catch (e2) { status.textContent = `✗ ${e2.message}`; status.style.color = '#f43f5e'; }
+    return;
+  }
+
+  if (btn.classList.contains('prov-save-model')) {
+    const input = row.querySelector('.prov-model');
+    const model = input.value.trim();
+    if (!model) return;
+    try {
+      await api('POST', `/settings/providers/${prov}/model`, { model });
+    } catch {}
+    loadProviders();
+    return;
+  }
+
+  if (btn.classList.contains('prov-refresh-models')) {
+    const input = row.querySelector('.prov-model');
+    try {
+      const d = await api('GET', `/settings/providers/${prov}/models`);
+      if (d.models && d.models.length) input.value = d.models[0];
+    } catch {}
+    return;
+  }
+
+  if (btn.classList.contains('prov-test')) {
+    const status = row.querySelector('.prov-test-status');
+    status.textContent = 'testing...';
+    status.style.color = '';
+    try {
+      const d = await api('POST', `/settings/providers/${prov}/test`);
+      status.textContent = d.available ? '● online' : '○ offline';
+      status.style.color = d.available ? '#2dd4bf' : '#f43f5e';
+    } catch (e2) { status.textContent = `✗ ${e2.message}`; status.style.color = '#f43f5e'; }
+    return;
+  }
+});
+
+document.getElementById('providers-refresh').addEventListener('click', loadProviders);
+
+// ==================== MEMORY ====================
+document.querySelectorAll('#page-memory .tab-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#page-memory .tab-btn').forEach(t => t.classList.remove('active'));
+  b.classList.add('active');
+  document.querySelectorAll('.mem-tab').forEach(t => t.style.display = 'none');
+  document.getElementById(b.dataset.tab).style.display = 'flex';
+  document.getElementById(b.dataset.tab).style.flexDirection = 'column';
+  if (b.dataset.tab === 'mem-project') loadProjectList();
+  if (b.dataset.tab === 'mem-sessions') loadSessions();
+}));
+
+async function loadMemOverview() {
+  try {
+    const o = await api('GET', '/memory/overview');
+    document.getElementById('mem-overview').textContent =
+      `${o.projects} projects · ${o.daily_days} daily notes · ${o.sessions} sessions (${o.turns} turns)`;
+  } catch {}
+}
+
+// ----- Long-term -----
+async function loadMemLongterm() {
+  try { const d = await api('GET', '/memory/long-term-text'); document.getElementById('mem-longterm-editor').value = d.text || ''; } catch {}
+}
+document.getElementById('mem-longterm-save').addEventListener('click', async () => {
+  const text = document.getElementById('mem-longterm-editor').value;
+  await api('POST', '/memory/long-term-text', { text });
+  showStatus(document.getElementById('mem-longterm-status'), '✓ Long-term memory saved.', 'var(--ok)');
+});
+loadMemLongterm();
+
+// ----- Projects -----
+let memSelectedProject = null;
+let memActiveProject = null;
+let memProjectDirty = false;
+
+const memProjEditor = document.getElementById('mem-project-editor');
+const memProjTitle = document.getElementById('mem-project-title');
+const memProjStatus = document.getElementById('mem-project-status');
+
+memProjEditor.addEventListener('input', () => { memProjectDirty = true; });
+
+function confirmDiscardProject() {
+  return !memProjectDirty || confirm('You have unsaved changes in this project. Discard them?');
+}
+
+async function loadProjectList() {
+  try {
+    const [projects, active] = await Promise.all([
+      api('GET', '/memory/projects'),
+      api('GET', '/memory/active-project'),
+    ]);
+    memActiveProject = active.project || null;
+    const list = document.getElementById('mem-project-list');
+    if (!projects.length) {
+      list.innerHTML = '<p class="text-dim text-sm" style="padding:8px">No projects yet. Create one above — e.g. Emma, HyperClutch, BroniqLabs.</p>';
+    } else {
+      list.innerHTML = projects.map(p => {
+        const when = p.updated_at ? p.updated_at.slice(0, 10) : '';
+        const star = p.project === memActiveProject ? '<span class="proj-star">★</span>' : '';
+        const sel = p.project === memSelectedProject ? ' selected' : '';
+        return `<div class="proj-item${sel}" data-project="${escapeHtml(p.project)}">${star}<span>${escapeHtml(p.project)}</span><span class="proj-meta">${when}</span></div>`;
+      }).join('');
+    }
+    // Keep selection valid if the selected project disappeared
+    if (memSelectedProject && !projects.some(p => p.project === memSelectedProject)) {
+      memSelectedProject = null;
+      setProjectEditorState();
+    }
+    updateFocusButton();
+  } catch (e) {
+    document.getElementById('mem-project-list').innerHTML =
+      `<p class="text-dim text-sm" style="padding:8px">⚠ ${escapeHtml(e.message)}</p>`;
+  }
+  loadMemOverview();
+}
+
+function setProjectEditorState() {
+  const has = !!memSelectedProject;
+  memProjEditor.disabled = !has;
+  document.getElementById('mem-project-save').disabled = !has;
+  memProjTitle.textContent = has ? memSelectedProject : 'No project selected';
+  if (!has) { memProjEditor.value = ''; memProjectDirty = false; }
+  updateFocusButton();
+}
+
+function updateFocusButton() {
+  const btn = document.getElementById('mem-project-focus');
+  if (memSelectedProject && memSelectedProject === memActiveProject) {
+    btn.textContent = '★ Focused';
+    btn.classList.add('ok');
+  } else {
+    btn.textContent = '☆ Focus';
+    btn.classList.remove('ok');
+  }
+}
+
+async function selectProject(name) {
+  if (!confirmDiscardProject()) return;
+  memSelectedProject = name;
+  try {
+    const d = await api('GET', `/memory/project-text/${encodeURIComponent(name)}`);
+    memProjEditor.value = d.text || '';
+    memProjectDirty = false;
+  } catch (e) {
+    showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)');
+  }
+  setProjectEditorState();
+  document.querySelectorAll('.proj-item').forEach(el =>
+    el.classList.toggle('selected', el.dataset.project === name));
+}
+
+document.getElementById('mem-project-list').addEventListener('click', e => {
+  const item = e.target.closest('.proj-item');
+  if (item) selectProject(item.dataset.project);
+});
+
+document.getElementById('mem-project-create').addEventListener('click', async () => {
+  const input = document.getElementById('mem-project-new-name');
+  const name = input.value.trim();
+  if (!name) return;
+  if (!confirmDiscardProject()) return;
+  try {
+    // Creating = writing its (empty) note; the project then shows up in the list.
+    await api('POST', '/memory/project-text', { project: name, text: '' });
+    input.value = '';
+    memSelectedProject = name;
+    memProjEditor.value = '';
+    memProjectDirty = false;
+    setProjectEditorState();
+    await loadProjectList();
+    document.querySelectorAll('.proj-item').forEach(el =>
+      el.classList.toggle('selected', el.dataset.project === name));
+  } catch (e) { showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+document.getElementById('mem-project-save').addEventListener('click', async () => {
+  if (!memSelectedProject) return;
+  try {
+    await api('POST', '/memory/project-text', { project: memSelectedProject, text: memProjEditor.value });
+    memProjectDirty = false;
+    showStatus(memProjStatus, `✓ '${memSelectedProject}' saved.`, 'var(--ok)');
+    loadProjectList();
+  } catch (e) { showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+document.getElementById('mem-project-rename').addEventListener('click', async () => {
+  if (!memSelectedProject) return;
+  const newName = prompt(`Rename project '${memSelectedProject}' to:`, memSelectedProject);
+  if (!newName || newName.trim() === memSelectedProject) return;
+  try {
+    await api('POST', '/memory/project/rename', { old: memSelectedProject, new: newName.trim() });
+    memSelectedProject = newName.trim();
+    setProjectEditorState();
+    await loadProjectList();
+    document.querySelectorAll('.proj-item').forEach(el =>
+      el.classList.toggle('selected', el.dataset.project === memSelectedProject));
+    showStatus(memProjStatus, '✓ Renamed.', 'var(--ok)');
+  } catch (e) { showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+document.getElementById('mem-project-delete').addEventListener('click', async () => {
+  if (!memSelectedProject) return;
+  if (!confirm(`Delete ALL memory for project '${memSelectedProject}'? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/memory/project/${encodeURIComponent(memSelectedProject)}`);
+    memSelectedProject = null;
+    memProjectDirty = false;
+    setProjectEditorState();
+    loadProjectList();
+    showStatus(memProjStatus, '✓ Project deleted.', 'var(--ok)');
+  } catch (e) { showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+document.getElementById('mem-project-focus').addEventListener('click', async () => {
+  if (!memSelectedProject) return;
+  const next = memSelectedProject === memActiveProject ? null : memSelectedProject;
+  try {
+    await api('POST', '/memory/active-project', { project: next });
+    memActiveProject = next;
+    loadProjectList();
+    showStatus(memProjStatus,
+      next ? `★ Emma now carries '${next}' into chats.` : 'Focus cleared.', 'var(--ok)');
+  } catch (e) { showStatus(memProjStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+// ----- Daily -----
+document.getElementById('mem-daily-date').textContent = new Date().toISOString().slice(0, 10);
+async function loadMemDaily() {
+  try { const d = await api('GET', '/memory/daily-text'); document.getElementById('mem-daily-editor').value = d.text || ''; } catch {}
+}
+document.getElementById('mem-daily-save').addEventListener('click', async () => {
+  const text = document.getElementById('mem-daily-editor').value;
+  await api('POST', '/memory/daily-text', { text });
+  showStatus(document.getElementById('mem-daily-status'), '✓ Daily memory saved.', 'var(--ok)');
+});
+loadMemDaily();
+
+// ----- Conversations -----
+async function loadSessions() {
+  try {
+    const sessions = await api('GET', '/memory/sessions');
+    const tbody = document.getElementById('mem-sessions-table');
+    if (!sessions.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-dim">No conversations yet.</td></tr>';
+    } else {
+      tbody.innerHTML = sessions.map(s => `
+        <tr>
+          <td class="text-mono">${escapeHtml(s.session_id)}</td>
+          <td>${s.turns}</td>
+          <td class="text-dim">${escapeHtml((s.last_at || '').slice(0, 16).replace('T', ' '))}</td>
+          <td><button class="danger mem-session-clear" data-session="${escapeHtml(s.session_id)}" style="padding:4px 10px;font-size:12px">Clear</button></td>
+        </tr>`).join('');
+    }
+  } catch (e) {
+    showStatus(document.getElementById('mem-sessions-status'), `✗ ${e.message}`, 'var(--err)');
+  }
+  loadMemOverview();
+}
+document.getElementById('mem-sessions-table').addEventListener('click', async e => {
+  const btn = e.target.closest('.mem-session-clear');
+  if (!btn) return;
+  const sid = btn.dataset.session;
+  if (!confirm(`Clear conversation history for session '${sid}'?`)) return;
+  try {
+    await api('DELETE', `/memory/sessions/${encodeURIComponent(sid)}`);
+    loadSessions();
+    showStatus(document.getElementById('mem-sessions-status'), `✓ '${sid}' cleared.`, 'var(--ok)');
+  } catch (e2) {
+    showStatus(document.getElementById('mem-sessions-status'), `✗ ${e2.message}`, 'var(--err)');
+  }
+});
+
+document.getElementById('mem-refresh').addEventListener('click', () => {
+  loadMemLongterm(); loadMemDaily(); loadProjectList(); loadSessions(); loadMemOverview();
+});
+loadMemOverview();
+
+// ==================== TASKS & REMINDERS ====================
+const taskTable = document.getElementById('task-table');
+const remTable = document.getElementById('rem-table');
+const taskStatus = document.getElementById('task-status');
+const remStatus = document.getElementById('rem-status');
+
+const PRIO_COLOR = { high: 'var(--err)', medium: 'var(--warn)', low: 'var(--text-dim)' };
+
+async function loadTasks() {
+  try {
+    const showDone = document.getElementById('task-show-done').checked;
+    const [all, counts] = await Promise.all([
+      api('GET', '/tasks' + (showDone ? '' : '?status=pending')),
+      api('GET', '/tasks/counts'),
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    document.getElementById('task-counts').textContent =
+      `${counts.pending} open` +
+      (counts.due_today ? ` · ${counts.due_today} due today` : '') +
+      (counts.overdue ? ` · ${counts.overdue} OVERDUE` : '');
+    if (!all.length) {
+      taskTable.innerHTML = '<tr><td colspan="6" class="text-dim">No tasks. Add one above, or ask Emma in chat.</td></tr>';
+      return;
+    }
+    taskTable.innerHTML = all.map(t => {
+      const done = t.status === 'done';
+      const overdue = !done && t.deadline && t.deadline.slice(0, 10) < today;
+      const dl = t.deadline ? t.deadline.slice(0, 10) : '';
+      return `<tr style="${done ? 'opacity:.45' : ''}">
+        <td><input type="checkbox" class="task-toggle" data-id="${t.id}" ${done ? 'checked' : ''}></td>
+        <td style="${done ? 'text-decoration:line-through' : ''}">${escapeHtml(t.title)}</td>
+        <td class="text-dim">${escapeHtml(t.project || '')}</td>
+        <td style="color:${PRIO_COLOR[t.priority] || 'inherit'}">${escapeHtml(t.priority)}</td>
+        <td style="${overdue ? 'color:var(--err);font-weight:600' : ''}">${dl}${overdue ? ' ⚠' : ''}</td>
+        <td><button class="danger task-del" data-id="${t.id}" style="padding:2px 8px;font-size:11px">✕</button></td>
+      </tr>`;
+    }).join('');
+  } catch (e) { showStatus(taskStatus, `✗ ${e.message}`, 'var(--err)'); }
+}
+
+document.getElementById('task-add').addEventListener('click', async () => {
+  const title = document.getElementById('task-new-title').value.trim();
+  if (!title) return;
+  try {
+    await api('POST', '/tasks', {
+      title,
+      project: document.getElementById('task-new-project').value.trim() || null,
+      priority: document.getElementById('task-new-priority').value,
+      deadline: document.getElementById('task-new-deadline').value || null,
+    });
+    document.getElementById('task-new-title').value = '';
+    document.getElementById('task-new-deadline').value = '';
+    loadTasks();
+  } catch (e) { showStatus(taskStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+document.getElementById('task-new-title').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('task-add').click();
+});
+
+taskTable.addEventListener('click', async e => {
+  const toggle = e.target.closest('.task-toggle');
+  if (toggle) {
+    try {
+      await api('POST', `/tasks/${toggle.dataset.id}/${toggle.checked ? 'done' : 'reopen'}`);
+      loadTasks();
+    } catch (e2) { showStatus(taskStatus, `✗ ${e2.message}`, 'var(--err)'); }
+    return;
+  }
+  const del = e.target.closest('.task-del');
+  if (del) {
+    try { await api('DELETE', `/tasks/${del.dataset.id}`); loadTasks(); }
+    catch (e2) { showStatus(taskStatus, `✗ ${e2.message}`, 'var(--err)'); }
+  }
+});
+
+document.getElementById('task-show-done').addEventListener('change', loadTasks);
+document.getElementById('task-clear-done').addEventListener('click', async () => {
+  try {
+    const d = await api('DELETE', '/tasks/done');
+    showStatus(taskStatus, `✓ Removed ${d.deleted} completed task(s).`, 'var(--ok)');
+    loadTasks();
+  } catch (e) { showStatus(taskStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+// ----- Reminders -----
+function fmtWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const today = new Date().toDateString() === d.toDateString();
+  return (today ? '' : d.toLocaleDateString() + ' ') +
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadReminders() {
+  try {
+    const rems = await api('GET', '/reminders');
+    if (!rems.length) {
+      remTable.innerHTML = '<tr><td colspan="5" class="text-dim">No active reminders.</td></tr>';
+      return;
+    }
+    const now = new Date();
+    remTable.innerHTML = rems.map(r => {
+      const due = new Date(r.trigger_at) <= now;
+      const flags = [r.persistent ? 'nag' : '', r.important ? '❗' : ''].filter(Boolean).join(' ');
+      return `<tr>
+        <td class="text-mono" style="${due ? 'color:var(--warn)' : ''}">${fmtWhen(r.trigger_at)}${due ? ' (due)' : ''}</td>
+        <td>${escapeHtml(r.message)}</td>
+        <td class="text-dim">${r.repeat === 'none' ? '' : escapeHtml(r.repeat)}</td>
+        <td>${flags}</td>
+        <td>
+          <button class="rem-dismiss" data-id="${r.id}" style="padding:2px 8px;font-size:11px">Dismiss</button>
+          <button class="danger rem-del" data-id="${r.id}" style="padding:2px 8px;font-size:11px">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (e) { showStatus(remStatus, `✗ ${e.message}`, 'var(--err)'); }
+}
+
+document.getElementById('rem-add').addEventListener('click', async () => {
+  const message = document.getElementById('rem-new-message').value.trim();
+  if (!message) return;
+  const at = document.getElementById('rem-new-time').value;
+  const mins = parseInt(document.getElementById('rem-new-minutes').value);
+  const body = {
+    message,
+    repeat: document.getElementById('rem-new-repeat').value,
+    persistent: document.getElementById('rem-new-persistent').checked,
+    important: document.getElementById('rem-new-important').checked,
+  };
+  if (at) body.trigger_at = at;
+  else if (mins > 0) body.in_minutes = mins;
+  else { showStatus(remStatus, '✗ Pick a time or minutes-from-now.', 'var(--err)'); return; }
+  try {
+    await api('POST', '/reminders', body);
+    document.getElementById('rem-new-message').value = '';
+    document.getElementById('rem-new-time').value = '';
+    document.getElementById('rem-new-minutes').value = '';
+    showStatus(remStatus, '✓ Reminder set.', 'var(--ok)');
+    loadReminders();
+  } catch (e) { showStatus(remStatus, `✗ ${e.message}`, 'var(--err)'); }
+});
+
+remTable.addEventListener('click', async e => {
+  const dis = e.target.closest('.rem-dismiss');
+  const del = e.target.closest('.rem-del');
+  try {
+    if (dis) await api('POST', `/reminders/${dis.dataset.id}/dismiss`);
+    else if (del) await api('DELETE', `/reminders/${del.dataset.id}`);
+    else return;
+    loadReminders();
+  } catch (e2) { showStatus(remStatus, `✗ ${e2.message}`, 'var(--err)'); }
+});
+
+// ----- Daily brief -----
+async function showBrief(kind) {
+  const el = document.getElementById('brief-text');
+  const st = document.getElementById('brief-status');
+  st.textContent = 'Emma is thinking...';
+  el.style.display = 'none';
+  try {
+    const d = await api('GET', `/planning/${kind}`);
+    let text = d.summary;
+    if (!text) {
+      // No AI provider up - fall back to the structured data.
+      text = kind === 'morning'
+        ? `${d.counts.pending} open task(s)` +
+          (d.counts.due_today ? `, ${d.counts.due_today} due today` : '') +
+          (d.counts.overdue ? `, ${d.counts.overdue} overdue` : '') +
+          (d.schedule.length ? `. Schedule: ${d.schedule.join('; ')}` : '.')
+        : `Completed today: ${d.completed_today.length}. Still open: ${d.remaining.length}.`;
+    }
+    el.textContent = text;
+    el.style.display = 'block';
+    st.textContent = '';
+  } catch (e) { st.textContent = `✗ ${e.message}`; }
+}
+document.getElementById('brief-morning').addEventListener('click', () => showBrief('morning'));
+document.getElementById('brief-night').addEventListener('click', () => showBrief('night'));
+
+document.getElementById('tasks-refresh').addEventListener('click', () => { loadTasks(); loadReminders(); });
+loadTasks();
+loadReminders();
+
+// ==================== SCHEDULE ====================
+const schTable = document.getElementById('sch-table');
+const schDate = document.getElementById('sch-date');
+schDate.valueAsDate = new Date();
+
+async function loadSchedule() {
+  const day = schDate.value;
+  // Status
+  try {
+    const st = await api('GET', '/status');
+    const el = document.getElementById('sch-status');
+    if (st.is_busy) {
+      const note = st.note ? ` - ${escapeHtml(st.note)}` : '';
+      el.innerHTML = `<span style="color:var(--warn)">● Busy${note}</span>`;
+    } else {
+      el.innerHTML = `<span style="color:var(--ok)">● Free</span>`;
+    }
+  } catch {}
+  // Blocks
+  try {
+    const blocks = await api('GET', `/schedule/${day}`);
+    schTable.innerHTML = blocks.map((b, i) => {
+      const start = b.start ? b.start.slice(11, 16) : '09:00';
+      const end = b.end ? b.end.slice(11, 16) : '10:00';
+      const busyChecked = b.busy ? 'checked' : '';
+      return `<tr data-index="${i}">
+        <td><input type="time" value="${start}" class="sch-start" style="width:90px"></td>
+        <td><input type="time" value="${end}" class="sch-end" style="width:90px"></td>
+        <td><input type="text" value="${escapeHtml(b.title || '')}" class="sch-title" style="width:100%"></td>
+        <td><input type="checkbox" class="sch-busy" ${busyChecked}></td>
+        <td><input type="checkbox" class="sch-notify" checked></td>
+        <td><input type="radio" name="sch-select" value="${i}"></td>
+      </tr>`;
+    }).join('');
+    if (!blocks.length) schTable.innerHTML = '';
+  } catch {}
+  // Users
+  try {
+    const users = await api('GET', '/notifications/users');
+    const sel = document.getElementById('sch-owner-select');
+    sel.innerHTML = users.map(u =>
+      `<option value="${u.telegram_id}">${escapeHtml(u.name)} (tid: ${u.telegram_id})</option>`
+    ).join('');
+  } catch {}
+}
+
+document.getElementById('sch-generate').addEventListener('click', async () => {
+  const text = document.getElementById('sch-text').value.trim();
+  if (!text) return;
+  const btn = document.getElementById('sch-generate');
+  btn.disabled = true; btn.textContent = 'Generating...';
+  try {
+    await api('POST', '/schedule/build', { day: schDate.value, text });
+    document.getElementById('sch-text').value = '';
+    loadSchedule();
+  } catch {}
+  btn.disabled = false; btn.textContent = 'Generate Schedule';
+});
+
+document.getElementById('sch-save').addEventListener('click', async () => {
+  const rows = schTable.querySelectorAll('tr');
+  const blocks = [];
+  for (const tr of rows) {
+    const start = tr.querySelector('.sch-start').value || '09:00';
+    const end = tr.querySelector('.sch-end').value || '10:00';
+    const title = tr.querySelector('.sch-title').value.trim() || 'Busy';
+    const busy = tr.querySelector('.sch-busy').checked;
+    blocks.push({ start, end, title, busy });
+  }
+  await api('POST', '/schedule', { day: schDate.value, blocks });
+  loadSchedule();
+});
+
+document.getElementById('sch-add').addEventListener('click', () => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="time" value="09:00" class="sch-start" style="width:90px"></td>
+    <td><input type="time" value="10:00" class="sch-end" style="width:90px"></td>
+    <td><input type="text" value="" class="sch-title" style="width:100%" placeholder="Activity"></td>
+    <td><input type="checkbox" class="sch-busy" checked></td>
+    <td><input type="checkbox" class="sch-notify" checked></td>
+    <td><input type="radio" name="sch-select"></td>
+  `;
+  schTable.appendChild(tr);
+});
+
+document.getElementById('sch-delete').addEventListener('click', () => {
+  const sel = document.querySelector('input[name="sch-select"]:checked');
+  if (sel) sel.closest('tr').remove();
+});
+
+document.getElementById('sch-refresh').addEventListener('click', loadSchedule);
+document.getElementById('sch-date').addEventListener('change', loadSchedule);
+document.getElementById('sch-set-owner').addEventListener('click', async () => {
+  const tid = parseInt(document.getElementById('sch-owner-select').value);
+  if (!tid) return;
+  await api('POST', '/notifications/users/owner', { telegram_id: tid });
+  alert('Owner updated.');
+});
+
+loadSchedule();
+
+// ==================== NOTIFICATIONS & BUSY MODE ====================
+
+let selectedUserId = null;
+
+async function loadNotificationsBusy() {
+  // Status
+  try {
+    const st = await api('GET', '/status');
+    const el = document.getElementById('nb-state');
+    if (st.is_busy) {
+      const note = st.note ? ` - ${escapeHtml(st.note)}` : '';
+      el.innerHTML = `<span style="color:var(--warn)">● Busy${note}</span>`;
+    } else {
+      el.innerHTML = `<span style="color:var(--ok)">● Free</span>`;
+    }
+  } catch {}
+  // Bot status
+  try {
+    const status = await api('GET', '/notifications/bot-status');
+    const bst = document.getElementById('nb-bot-status');
+    if (!status.has_token) {
+      bst.textContent = 'Bot: no token - set TELEGRAM_BOT_TOKEN in .env';
+      bst.style.color = '#f43f5e';
+      document.getElementById('nb-bot-start').disabled = true;
+      document.getElementById('nb-bot-stop').disabled = true;
+    } else if (status.running) {
+      bst.innerHTML = '<span class="online">●</span> Bot: running';
+      bst.style.color = '#2dd4bf';
+      document.getElementById('nb-bot-start').disabled = true;
+      document.getElementById('nb-bot-stop').disabled = false;
+    } else {
+      bst.innerHTML = '<span class="offline">●</span> Bot: stopped';
+      bst.style.color = '#f59e0b';
+      document.getElementById('nb-bot-start').disabled = false;
+      document.getElementById('nb-bot-stop').disabled = true;
+    }
+  } catch {}
+  // Users
+  try {
+    const users = await api('GET', '/notifications/users');
+    document.getElementById('nb-user-table').innerHTML = users.map(u => `
+      <tr data-id="${u.telegram_id}" data-priority="${u.priority || 'normal'}" data-notify="${u.notify_on_busy ? 1 : 0}" data-message="${escapeHtml(u.busy_message || '')}" data-prompt="${escapeHtml(u.prompt || '')}">
+        <td><input type="radio" name="nb-select" value="${u.telegram_id}"></td>
+        <td>${escapeHtml(u.name)}</td>
+        <td>${escapeHtml(u.priority || 'normal')}</td>
+        <td>${u.notify_on_busy ? '✓' : ''}</td>
+      </tr>
+    `).join('');
+  } catch {}
+}
+
+document.getElementById('nb-busy').addEventListener('click', async () => {
+  const note = document.getElementById('nb-note').value.trim() || null;
+  await api('POST', '/status/busy', { note });
+  loadNotificationsBusy();
+});
+document.getElementById('nb-free').addEventListener('click', async () => {
+  await api('POST', '/status/free');
+  loadNotificationsBusy();
+});
+document.getElementById('nb-bot-start').addEventListener('click', async () => {
+  await api('POST', '/notifications/bot/start');
+  loadNotificationsBusy();
+});
+document.getElementById('nb-bot-stop').addEventListener('click', async () => {
+  await api('POST', '/notifications/bot/stop');
+  loadNotificationsBusy();
+});
+document.getElementById('nb-refresh').addEventListener('click', loadNotificationsBusy);
+
+document.getElementById('nb-save').addEventListener('click', async () => {
+  if (!selectedUserId) return;
+  const priority = document.getElementById('nb-priority').value;
+  const notify = document.getElementById('nb-notify').checked;
+  const message = document.getElementById('nb-message').value.trim() || null;
+  const prompt = document.getElementById('nb-prompt').value.trim() || null;
+  await api('POST', '/notifications/users/notify', { telegram_id: selectedUserId, notify_on_busy: notify });
+  await api('POST', '/notifications/users/priority', { telegram_id: selectedUserId, priority });
+  await api('POST', '/notifications/users/messages', { telegram_id: selectedUserId, busy_message: message, free_message: null });
+  if (prompt !== null) {
+    await api('POST', '/notifications/users/prompt', { telegram_id: selectedUserId, prompt });
+  }
+  loadNotificationsBusy();
+});
+
+document.addEventListener('change', e => {
+  if (e.target.matches('#nb-user-table input[type="radio"]')) {
+    selectedUserId = parseInt(e.target.value);
+    const tr = e.target.closest('tr');
+    const prio = tr.dataset.priority || 'normal';
+    const prioSel = document.getElementById('nb-priority');
+    for (let i = 0; i < prioSel.options.length; i++) {
+      if (prioSel.options[i].value === prio) { prioSel.selectedIndex = i; break; }
+    }
+    document.getElementById('nb-notify').checked = tr.dataset.notify === '1';
+    document.getElementById('nb-message').value = tr.dataset.message || '';
+    document.getElementById('nb-prompt').value = tr.dataset.prompt || '';
+  }
+});
+
+loadNotificationsBusy();
+
+// ==================== SELF-CARE ====================
+const selfcareLog = document.getElementById('selfcare-log');
+const selfcareVersion = document.getElementById('selfcare-version');
+const selfcareChangelog = document.getElementById('selfcare-changelog-table');
+
+function appendLog(text) { selfcareLog.textContent += text + '\n'; selfcareLog.scrollTop = selfcareLog.scrollHeight; }
+function clearLog() { selfcareLog.textContent = ''; }
+
+async function loadVersion() {
+  try { const d = await api('GET', '/selfcare/version'); selfcareVersion.textContent = `Branch: ${d.branch}  //  Commit: ${d.commit}  //  Released: ${d.date}`; } catch {}
+}
+async function loadChangelog() {
+  try {
+    const data = await api('GET', '/selfcare/changelog');
+    selfcareChangelog.innerHTML = data.map(c => `
+      <tr>
+        <td style="font-family:var(--mono);font-size:11px">${escapeHtml(c.hash)}</td>
+        <td>${escapeHtml(c.date)}</td>
+        <td>${escapeHtml(c.author)}</td>
+        <td>${escapeHtml(c.message)}</td>
+      </tr>
+    `).join('');
+  } catch {}
+}
+document.getElementById('selfcare-diag').addEventListener('click', async () => {
+  clearLog();
+  appendLog('Running comprehensive system diagnostics...');
+  try {
+    const report = await api('GET', '/selfcare/diagnostics');
+    appendLog('\n=== DIAGNOSTICS REPORT ===');
+    appendLog('\n[DATABASES]');
+    for (const [db, st] of Object.entries(report.databases || {})) appendLog(`  ${st === 'ok' ? '✔' : '❌'} ${db}: ${st}`);
+    appendLog('\n[CONFIGURATION]');
+    for (const [k, v] of Object.entries(report.config || {})) appendLog(`  ${v === 'present' || v === 'configured' ? '✔' : '❌'} ${k}: ${v}`);
+    appendLog('\n[AI PROVIDERS]');
+    for (const p of report.providers || []) appendLog(`  ${p.available ? '✔' : '❌'} ${p.name}: ${p.configured ? 'Configured' : 'Not configured'} (${p.available ? 'Online' : 'Offline'}, model: ${p.default_model})`);
+    appendLog('\n[DEPENDENCIES]');
+    for (const d of report.dependencies || []) appendLog(`  ${d.installed ? '✔' : '❌'} ${d.name}${d.installed ? ` (v${d.version})` : ' (NOT INSTALLED)'}`);
+    const disk = report.disk || {};
+    appendLog(`\n[DISK]\n  Total: ${((disk.total || 0) / 1e9).toFixed(1)} GB  Free: ${((disk.free || 0) / 1e9).toFixed(1)} GB`);
+  } catch (e) { appendLog(`\nDiagnostics failed: ${e.message}`); }
+});
+document.getElementById('selfcare-repair').addEventListener('click', async () => {
+  clearLog();
+  appendLog('Initiating auto-repair...');
+  try {
+    const rep = await api('POST', '/selfcare/repair');
+    appendLog('\n=== AUTO-REPAIR RESULTS ===');
+    appendLog('\n[CONFIG]');
+    for (const [k, v] of Object.entries(rep.config || {})) appendLog(`  ${k}: ${v}`);
+    appendLog('\n[DATABASES]');
+    for (const [db, v] of Object.entries(rep.databases || {})) appendLog(`  ${db}: ${v}`);
+  } catch (e) { appendLog(`Repair failed: ${e.message}`); }
+});
+document.getElementById('selfcare-check-updates').addEventListener('click', async () => {
+  clearLog();
+  appendLog('Checking for updates...');
+  try {
+    const info = await api('GET', '/selfcare/updates');
+    if (info.error) { appendLog(`Git error: ${info.error}`); return; }
+    appendLog(`\nLocal: ${info.current_commit}`);
+    if (info.has_updates) {
+      appendLog(`Behind by ${info.behind_by} commit(s)`);
+      appendLog(`Latest: ${info.latest_message}`);
+      document.getElementById('selfcare-apply-updates').disabled = false;
+    } else {
+      appendLog('Up to date.');
+      document.getElementById('selfcare-apply-updates').disabled = true;
+    }
+  } catch (e) { appendLog(`Check failed: ${e.message}`); }
+});
+document.getElementById('selfcare-apply-updates').addEventListener('click', async () => {
+  appendLog('\nApplying updates...');
+  document.getElementById('selfcare-apply-updates').disabled = true;
+  try {
+    const info = await api('POST', '/selfcare/updates/apply');
+    if (info.success) {
+      appendLog(info.message);
+      loadVersion(); loadChangelog();
+    } else appendLog(`Failed: ${info.message}`);
+  } catch (e) { appendLog(`Apply failed: ${e.message}`); }
+});
+document.getElementById('selfcare-deps').addEventListener('click', async () => {
+  appendLog('\nUpdating dependencies...');
+  document.getElementById('selfcare-deps').disabled = true;
+  try {
+    const info = await api('POST', '/selfcare/updates/deps');
+    appendLog(info.success ? info.message : `Failed: ${info.message}`);
+  } catch (e) { appendLog(`Deps failed: ${e.message}`); }
+  document.getElementById('selfcare-deps').disabled = false;
+});
+document.getElementById('selfcare-refresh-version').addEventListener('click', () => { loadVersion(); loadChangelog(); });
+loadVersion();
+loadChangelog();
+
+// ==================== REFRESH DATA ON TAB SWITCH ====================
+document.querySelectorAll('.nav li').forEach(li => {
+  li.addEventListener('click', () => {
+    const page = li.dataset.page;
+    if (page === 'providers') loadProviders();
+    if (page === 'tasks') { loadTasks(); loadReminders(); }
+    if (page === 'memory') { loadMemLongterm(); loadMemDaily(); loadProjectList(); loadMemOverview(); }
+    if (page === 'schedule') loadSchedule();
+    if (page === 'notifications-busy') { loadNotificationsBusy(); }
+    if (page === 'selfcare') { loadVersion(); loadChangelog(); }
+  });
+});
+
+// Load providers on first show
+setTimeout(loadProviders, 500);
+
+// Show status dot helper
+console.log('Emma web UI loaded');
+</script>
+</body>
+</html>

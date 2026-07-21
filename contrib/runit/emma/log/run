@@ -1,0 +1,4 @@
+#!/bin/sh
+# Log service for Emma - keeps rotated logs under /var/log/emma
+mkdir -p /var/log/emma
+exec svlogd -tt /var/log/emma
