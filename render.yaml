@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: emma
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements-server.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: EMMA_HF_BACKUP_REPO
+        sync: false
+      - key: EMMA_SPACE_URL
+        sync: false
