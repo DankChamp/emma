@@ -5,6 +5,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+import httpx
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -254,13 +255,29 @@ class TelegramMessenger(MessengerAdapter):
         self._started = True
         logger.info("Telegram bot started.")
 
+    async def _close_stale_session(self):
+        """Tell Telegram to close any existing polling session for this bot."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"https://api.telegram.org/bot{self.bot_token}/close",
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    logger.info("Closed stale Telegram session (ok)")
+        except Exception as exc:
+            logger.warning("Failed to close stale session: %s", exc)
+
     async def _run_polling(self):
         """Run polling with retry and auto-restart on crash."""
+        await self._close_stale_session()
+
         for attempt, delay in enumerate(_RETRY_DELAYS):
             try:
                 await self._app.updater.start_polling()
                 break
             except Exception as exc:
+                self._last_error = str(exc)
                 logger.warning(
                     "Telegram polling attempt %d/%d failed: %s",
                     attempt + 1, len(_RETRY_DELAYS), exc,
@@ -268,9 +285,10 @@ class TelegramMessenger(MessengerAdapter):
                 if attempt < len(_RETRY_DELAYS) - 1:
                     await asyncio.sleep(delay)
         else:
-            self._last_error = "All startup retries exhausted"
             self._started = False
             return
+
+        self._last_error = None
 
         # Keep alive — detect crash and auto-restart
         while True:
@@ -282,16 +300,17 @@ class TelegramMessenger(MessengerAdapter):
 
             if not self._app.updater.running:
                 logger.warning("Updater stopped — restarting...")
+                await self._close_stale_session()
                 for attempt, delay in enumerate(_RETRY_DELAYS):
                     try:
                         await self._app.updater.start_polling()
                         self._last_error = None
                         break
                     except Exception as exc:
+                        self._last_error = str(exc)
                         logger.warning("Restart attempt %d failed: %s", attempt + 1, exc)
                         await asyncio.sleep(delay)
                 else:
-                    self._last_error = "Restart retries exhausted"
                     self._started = False
                     return
 
