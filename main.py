@@ -41,7 +41,11 @@ scheduler = AsyncIOScheduler()
 
 # ---- Long-lived singletons ----
 busy_mode = BusyModeManager(settings.busy_mode_db_path)
-telegram = TelegramMessenger(settings.telegram_bot_token or "")
+telegram = TelegramMessenger(
+    bot_token=settings.telegram_bot_token or "",
+    owner_name=settings.owner_name,
+    owner_telegram_id=settings.owner_telegram_id,
+)
 notifications_mgr = NotificationManager(settings.notifications_db_path, telegram=telegram)
 appointment_mgr = AppointmentManager(settings.appointments_db_path)
 telegram._notify_mgr = notifications_mgr

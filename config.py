@@ -96,6 +96,8 @@ class Settings(BaseSettings):
 
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
+    owner_name: str = "Champ"
+    owner_telegram_id: Optional[int] = None
     notifications_db_path: Path = DATA_DIR / "notifications.db"
     appointments_db_path: Path = DATA_DIR / "appointments.db"
 

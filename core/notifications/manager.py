@@ -184,14 +184,15 @@ class NotificationManager:
         """
         if not self.telegram:
             return 0
+        owner = getattr(self.telegram, "_owner_name", "Champ")
         free_hint = self._free_hint()
         note_txt = f" ({note})" if note else ""
         sent = 0
         for user in self.list_notify_targets():
             if is_busy:
-                msg = user.get("busy_message") or self._default_busy(note_txt, free_hint)
+                msg = user.get("busy_message") or self._default_busy(note_txt, free_hint, owner)
             else:
-                msg = user.get("free_message") or "I'm free now — feel free to reach out."
+                msg = user.get("free_message") or f"{owner} is free now — feel free to reach out."
             if await self.telegram.send_to_user(user["telegram_id"], msg):
                 sent += 1
         return sent
@@ -228,10 +229,10 @@ class NotificationManager:
             return None
 
     @staticmethod
-    def _default_busy(note_txt: str, free_hint: Optional[str]) -> str:
-        base = f"Heads up — I'm busy right now{note_txt}. I'll get back to you when I'm free."
+    def _default_busy(note_txt: str, free_hint: Optional[str], owner: str = "Champ") -> str:
+        base = f"Heads up — {owner} is busy right now{note_txt}. He'll get back to you when he's free."
         if free_hint and free_hint.startswith("after"):
-            base += f" You should be able to reach me {free_hint}."
+            base += f" You should be able to reach him {free_hint}."
         return base
 
     # ---------- Bot lifecycle ----------
