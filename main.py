@@ -138,4 +138,11 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "telegram": {
+            "configured": bool(settings.telegram_bot_token),
+            "running": telegram.is_running,
+            "error": telegram.error,
+        },
+    }

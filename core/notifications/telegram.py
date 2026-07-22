@@ -1,14 +1,6 @@
-"""
-TelegramMessenger — Emma's Telegram bot.
-
-Purpose: let other people reach you through Emma. They message the bot; it
-tells them whether you're free and, when you're busy, when you'll next be free
-(read from your daily timetable). High-priority people are told they can reach
-you anyway, and you're alerted immediately.
-Also handles appointment booking via /book and /myslots commands.
-"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -36,6 +28,8 @@ HELP_BOOK = (
     "Or just tell me when you want, and I'll figure it out."
 )
 
+_RETRY_DELAYS = [5, 15, 30, 60, 120]
+
 
 class TelegramMessenger(MessengerAdapter):
     """Bot that answers availability queries and relays priority pings."""
@@ -49,6 +43,7 @@ class TelegramMessenger(MessengerAdapter):
         self._appointment_mgr = None
         self._app: Optional[Application] = None
         self._started = False
+        self._poll_task: Optional[asyncio.Task] = None
         self._message_log: list[dict] = []
 
     async def _build_app(self) -> Application:
@@ -246,16 +241,41 @@ class TelegramMessenger(MessengerAdapter):
     async def start(self):
         if self._started:
             return
+        if not self.bot_token:
+            logger.warning("No bot token — Telegram bot disabled.")
+            return
         self._app = await self._build_app()
         await self._app.initialize()
         await self._app.start()
-        await self._app.updater.start_polling()
+        self._poll_task = asyncio.create_task(self._run_polling())
         self._started = True
         logger.info("Telegram bot started.")
+
+    async def _run_polling(self):
+        """Run polling with automatic retry on failure."""
+        for attempt, delay in enumerate(_RETRY_DELAYS):
+            try:
+                await self._app.updater.start_polling()
+                return
+            except Exception as exc:
+                logger.warning(
+                    "Telegram polling attempt %d/%d failed: %s",
+                    attempt + 1, len(_RETRY_DELAYS), exc,
+                )
+                if attempt < len(_RETRY_DELAYS) - 1:
+                    await asyncio.sleep(delay)
+        logger.error("Telegram polling exhausted all retries — giving up.")
+        self._started = False
 
     async def stop(self):
         if not self._started or not self._app:
             return
+        if self._poll_task and not self._poll_task.done():
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
         await self._app.updater.stop()
         await self._app.stop()
         await self._app.shutdown()
@@ -289,7 +309,18 @@ class TelegramMessenger(MessengerAdapter):
 
     @property
     def is_running(self) -> bool:
-        return self._started
+        if not self._started:
+            return False
+        if self._poll_task and self._poll_task.done():
+            self._started = False
+            return False
+        return True
+
+    @property
+    def error(self) -> Optional[str]:
+        if self._poll_task and self._poll_task.done() and self._poll_task.exception():
+            return str(self._poll_task.exception())
+        return None
 
     @property
     def message_log(self) -> list[dict]:
