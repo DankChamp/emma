@@ -43,7 +43,9 @@ class TelegramMessenger(MessengerAdapter):
         self._appointment_mgr = None
         self._app: Optional[Application] = None
         self._started = False
+        self._stop_event: Optional[asyncio.Event] = None
         self._poll_task: Optional[asyncio.Task] = None
+        self._last_error: Optional[str] = None
         self._message_log: list[dict] = []
 
     async def _build_app(self) -> Application:
@@ -247,16 +249,17 @@ class TelegramMessenger(MessengerAdapter):
         self._app = await self._build_app()
         await self._app.initialize()
         await self._app.start()
+        self._stop_event = asyncio.Event()
         self._poll_task = asyncio.create_task(self._run_polling())
         self._started = True
         logger.info("Telegram bot started.")
 
     async def _run_polling(self):
-        """Run polling with automatic retry on failure."""
+        """Run polling with retry and auto-restart on crash."""
         for attempt, delay in enumerate(_RETRY_DELAYS):
             try:
                 await self._app.updater.start_polling()
-                return
+                break
             except Exception as exc:
                 logger.warning(
                     "Telegram polling attempt %d/%d failed: %s",
@@ -264,18 +267,44 @@ class TelegramMessenger(MessengerAdapter):
                 )
                 if attempt < len(_RETRY_DELAYS) - 1:
                     await asyncio.sleep(delay)
-        logger.error("Telegram polling exhausted all retries — giving up.")
-        self._started = False
+        else:
+            self._last_error = "All startup retries exhausted"
+            self._started = False
+            return
+
+        # Keep alive — detect crash and auto-restart
+        while True:
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=15)
+                return  # Clean stop requested
+            except asyncio.TimeoutError:
+                pass
+
+            if not self._app.updater.running:
+                logger.warning("Updater stopped — restarting...")
+                for attempt, delay in enumerate(_RETRY_DELAYS):
+                    try:
+                        await self._app.updater.start_polling()
+                        self._last_error = None
+                        break
+                    except Exception as exc:
+                        logger.warning("Restart attempt %d failed: %s", attempt + 1, exc)
+                        await asyncio.sleep(delay)
+                else:
+                    self._last_error = "Restart retries exhausted"
+                    self._started = False
+                    return
 
     async def stop(self):
         if not self._started or not self._app:
             return
+        if self._stop_event:
+            self._stop_event.set()
         if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
             try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
+                await asyncio.wait_for(self._poll_task, timeout=5)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._poll_task.cancel()
         await self._app.updater.stop()
         await self._app.stop()
         await self._app.shutdown()
@@ -309,18 +338,16 @@ class TelegramMessenger(MessengerAdapter):
 
     @property
     def is_running(self) -> bool:
-        if not self._started:
+        if not self._started or not self._app:
             return False
-        if self._poll_task and self._poll_task.done():
-            self._started = False
+        try:
+            return self._app.updater.running
+        except Exception:
             return False
-        return True
 
     @property
     def error(self) -> Optional[str]:
-        if self._poll_task and self._poll_task.done() and self._poll_task.exception():
-            return str(self._poll_task.exception())
-        return None
+        return self._last_error
 
     @property
     def message_log(self) -> list[dict]:
