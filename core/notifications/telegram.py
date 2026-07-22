@@ -4,12 +4,13 @@ TelegramMessenger — Emma's Telegram bot.
 Purpose: let other people reach you through Emma. They message the bot; it
 tells them whether you're free and, when you're busy, when you'll next be free
 (read from your daily timetable). High-priority people are told they can reach
-you anyway, and you're alerted immediately. No AI chat — just a smart relay.
+you anyway, and you're alerted immediately.
+Also handles appointment booking via /book and /myslots commands.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from telegram import Update
@@ -22,8 +23,17 @@ logger = logging.getLogger("emma.notifications.telegram")
 WELCOME = (
     "You're connected to Emma, my personal AI assistant.\n\n"
     "Your Telegram ID: {telegram_id}\n"
-    "Message me here anytime to check if I'm available — I'll tell you when "
-    "you can reach me."
+    "Commands:\n"
+    "/book <duration> — book time in my schedule\n"
+    "/myslots <day> — see my free slots for a day\n\n"
+    "Message me here anytime to check if I'm available."
+)
+
+HELP_BOOK = (
+    "To book time with me:\n"
+    "1. Find my free slots: /myslots today\n"
+    "2. Book: /book 1h at 14:00 tomorrow\n\n"
+    "Or just tell me when you want, and I'll figure it out."
 )
 
 
@@ -36,6 +46,7 @@ class TelegramMessenger(MessengerAdapter):
         self.bot_token = bot_token
         self._notify_mgr = notify_manager
         self._busy_mgr = busy_manager
+        self._appointment_mgr = None
         self._app: Optional[Application] = None
         self._started = False
         self._message_log: list[dict] = []
@@ -51,6 +62,116 @@ class TelegramMessenger(MessengerAdapter):
             self._log("connect", uid, name, "/start")
             await update.message.reply_text(WELCOME.format(telegram_id=uid))
 
+        async def _book(update: Update, context):
+            user = update.effective_user
+            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            chat_id = update.effective_chat.id
+            self._register(uid, name, chat_id)
+            self._log("command", uid, name, update.message.text)
+
+            args = context.args
+            if not args:
+                await update.message.reply_text(HELP_BOOK)
+                return
+
+            sched = getattr(self._notify_mgr, "schedule", None)
+            if not sched:
+                await update.message.reply_text("Sorry, the schedule system isn't available right now.")
+                return
+
+            text = " ".join(args)
+            target_day = date.today()
+            duration_minutes = 60
+
+            if "tomorrow" in text:
+                target_day = date.today() + timedelta(days=1)
+
+            import re
+            dur_match = re.search(r"(\d+)\s*h", text)
+            if dur_match:
+                duration_minutes = int(dur_match.group(1)) * 60
+            dur_match_min = re.search(r"(\d+)\s*min", text)
+            if dur_match_min:
+                duration_minutes = int(dur_match_min.group(1))
+
+            blocks = sched.list_day(target_day)
+            free_slots = []
+            if self._appointment_mgr:
+                free_slots = self._appointment_mgr.find_free_slots(target_day, blocks, duration_minutes)
+
+            if not free_slots:
+                await update.message.reply_text(
+                    f"Sorry, no free slots found for {target_day.isoformat()}."
+                )
+                return
+
+            slot = free_slots[0]
+            start_dt = datetime.fromisoformat(slot["start"])
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+            if self._appointment_mgr:
+                self._appointment_mgr.create(
+                    person_label=name,
+                    person_telegram_id=uid,
+                    day=target_day,
+                    start=start_dt.strftime("%H:%M"),
+                    end=end_dt.strftime("%H:%M"),
+                    title=f"Appointment with {name}",
+                    note=text,
+                )
+
+            time_str = f"{start_dt.strftime('%H:%M')}-{end_dt.strftime('%H:%M')}"
+            await update.message.reply_text(
+                f"✅ Booked you at {time_str} on {target_day.isoformat()}. "
+                f"I'll notify you if anything changes."
+            )
+
+            if self._notify_mgr:
+                await self._notify_mgr.notify_owner(
+                    f"📅 Appointment request from {name}: {text}\n"
+                    f"Time: {time_str} on {target_day.isoformat()}"
+                )
+
+        async def _myslots(update: Update, context):
+            user = update.effective_user
+            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            self._register(uid, name, update.effective_chat.id)
+            self._log("command", uid, name, update.message.text)
+
+            sched = getattr(self._notify_mgr, "schedule", None)
+            if not sched:
+                await update.message.reply_text("Schedule system not available.")
+                return
+
+            target_day = date.today()
+            if context.args:
+                arg = " ".join(context.args)
+                if arg == "tomorrow":
+                    target_day = date.today() + timedelta(days=1)
+                else:
+                    try:
+                        target_day = date.fromisoformat(arg)
+                    except ValueError:
+                        pass
+
+            blocks = sched.list_day(target_day)
+            free_slots = []
+            if self._appointment_mgr:
+                free_slots = self._appointment_mgr.find_free_slots(target_day, blocks, 30)
+
+            if not free_slots:
+                await update.message.reply_text(f"No free slots on {target_day.isoformat()}.")
+                return
+
+            lines = [f"Free slots for {target_day.isoformat()}:"]
+            for s in free_slots[:10]:
+                start = datetime.fromisoformat(s["start"])
+                end = datetime.fromisoformat(s["end"])
+                lines.append(f"  {start.strftime('%H:%M')} - {end.strftime('%H:%M')} ({s['duration_minutes']}min)")
+            if len(free_slots) > 10:
+                lines.append(f"  ... and {len(free_slots) - 10} more")
+            await update.message.reply_text("\n".join(lines))
+
         async def _handle_text(update: Update, _context):
             user = update.effective_user
             uid, name = user.id, user.full_name or user.first_name or str(uid)
@@ -61,6 +182,8 @@ class TelegramMessenger(MessengerAdapter):
             await self._reply_status(update, uid, name, text)
 
         app.add_handler(CommandHandler("start", _start))
+        app.add_handler(CommandHandler("book", _book))
+        app.add_handler(CommandHandler("myslots", _myslots))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_text))
         return app
 

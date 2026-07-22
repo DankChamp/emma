@@ -26,12 +26,21 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority TEXT NOT NULL DEFAULT 'medium',
     status TEXT NOT NULL DEFAULT 'pending',
     deadline TEXT,
+    estimated_hours REAL,
+    completed_hours REAL DEFAULT 0,
+    milestone_id INTEGER,
     created_at TEXT NOT NULL,
     completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project);
 """
+
+MIGRATIONS = [
+    "ALTER TABLE tasks ADD COLUMN estimated_hours REAL",
+    "ALTER TABLE tasks ADD COLUMN completed_hours REAL DEFAULT 0",
+    "ALTER TABLE tasks ADD COLUMN milestone_id INTEGER",
+]
 
 _ORDER = """
 ORDER BY
@@ -47,16 +56,25 @@ class TaskManager:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        for migration in MIGRATIONS:
+            try:
+                self.conn.execute(migration)
+            except sqlite3.OperationalError:
+                pass
+        self.conn.commit()
 
     def create(self, title: str, project: Optional[str] = None,
-               priority: str = "medium", deadline: Optional[str] = None) -> dict:
+               priority: str = "medium", deadline: Optional[str] = None,
+               estimated_hours: Optional[float] = None,
+               milestone_id: Optional[int] = None) -> dict:
         if priority not in PRIORITIES:
             priority = "medium"
         cur = self.conn.execute(
-            "INSERT INTO tasks (title, project, priority, status, deadline, created_at) "
-            "VALUES (?, ?, ?, 'pending', ?, ?)",
+            "INSERT INTO tasks (title, project, priority, status, deadline, "
+            "estimated_hours, milestone_id, created_at) "
+            "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
             (title.strip(), project or None, priority, deadline or None,
-             datetime.utcnow().isoformat()),
+             estimated_hours, milestone_id, datetime.utcnow().isoformat()),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)
@@ -67,7 +85,9 @@ class TaskManager:
 
     def update(self, task_id: int, *, title: Optional[str] = None,
                project: Optional[str] = None, priority: Optional[str] = None,
-               deadline: Optional[str] = None) -> Optional[dict]:
+               deadline: Optional[str] = None,
+               estimated_hours: Optional[float] = None,
+               milestone_id: Optional[int] = None) -> Optional[dict]:
         task = self.get(task_id)
         if not task:
             return None
@@ -79,9 +99,15 @@ class TaskManager:
             task["priority"] = priority
         if deadline is not None:
             task["deadline"] = deadline or None
+        if estimated_hours is not None:
+            task["estimated_hours"] = estimated_hours
+        if milestone_id is not None:
+            task["milestone_id"] = milestone_id or None
         self.conn.execute(
-            "UPDATE tasks SET title=?, project=?, priority=?, deadline=? WHERE id=?",
-            (task["title"], task["project"], task["priority"], task["deadline"], task_id),
+            "UPDATE tasks SET title=?, project=?, priority=?, deadline=?, "
+            "estimated_hours=?, milestone_id=? WHERE id=?",
+            (task["title"], task["project"], task["priority"], task["deadline"],
+             task.get("estimated_hours"), task.get("milestone_id"), task_id),
         )
         self.conn.commit()
         return self.get(task_id)

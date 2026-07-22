@@ -21,6 +21,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
+from .emergency import insert_emergency
 from .models import TimeBlock
 
 logger = logging.getLogger("emma.schedule")
@@ -124,17 +125,84 @@ class TimetableManager:
             blocks = self._naive_blocks(text)
         return self.set_day(day, blocks, create_reminders=create_reminders)
 
+    async def build_multi_day(self, text: str, days: int = 3,
+                              profile: Optional[dict] = None,
+                              pending_tasks: Optional[list[dict]] = None,
+                              study_summary: Optional[list[dict]] = None,
+                              contacts_text: Optional[str] = None,
+                              appointments_text: Optional[str] = None,
+                              memory_context: Optional[str] = None) -> dict[str, list[TimeBlock]]:
+        start = date.today()
+        profile_text = ""
+        if profile:
+            lines = []
+            for cat, vals in profile.items():
+                lines.append(f"## {cat}")
+                for k, v in vals.items():
+                    lines.append(f"- {k}: {v}")
+            profile_text = "\n".join(lines)
+
+        tasks_text = ""
+        if pending_tasks:
+            lines = []
+            for t in pending_tasks:
+                parts = [t["title"]]
+                if t.get("project"):
+                    parts.append(f"[{t['project']}]")
+                if t.get("priority") == "high":
+                    parts.append("(HIGH PRIORITY)")
+                if t.get("deadline"):
+                    parts.append(f"(due {t['deadline'][:10]})")
+                if t.get("estimated_hours"):
+                    parts.append(f"({t['estimated_hours']}h)")
+                lines.append("- " + " ".join(parts))
+            tasks_text = "\n".join(lines)
+
+        study_text = ""
+        if study_summary:
+            lines = [f"{s['subject']}: {s['total_hours']}h in {s['sessions']} sessions" for s in study_summary]
+            study_text = "\n".join(lines)
+
+        results: dict[str, list[TimeBlock]] = {}
+        for i in range(days):
+            day = start + timedelta(days=i)
+            day_name = day.strftime("%A")
+            extra = f"\n\n---\nDay {i+1} of {days}: {day_name}, {day.isoformat()}"
+            if profile_text:
+                extra += f"\n\nProfile information (use this to set realistic times for meals, work, routines):\n{profile_text}"
+            if tasks_text:
+                extra += f"\n\nPending tasks to schedule:\n{tasks_text}"
+            if study_text:
+                extra += f"\n\nStudy summary (last 7 days):\n{study_text}"
+            if contacts_text:
+                extra += f"\n\n{contacts_text}"
+            if appointments_text:
+                extra += f"\n\n{appointments_text}"
+            if memory_context:
+                extra += f"\n\nMemory context:\n{memory_context}"
+
+            prompt = text + extra
+            blocks = None
+            if self.ai_router:
+                blocks = await self._ai_blocks(prompt, day, memory_context=None)
+            if not blocks:
+                blocks = self._naive_blocks(text)
+            results[day.isoformat()] = self.set_day(day, blocks, create_reminders=True)
+        return results
+
     async def _ai_blocks(self, text: str, day: date, memory_context: Optional[str] = None) -> Optional[list[dict]]:
         from core.router import TaskType
         extra = ""
         if memory_context:
             extra = f"\n\nHere is additional context about the person's life, projects, and notes — use it to suggest realistic and relevant activities for today:\n{memory_context}\n\n"
         prompt = (
-            "Turn the following list of a person's tasks for the day into a realistic "
-            "timetable. Respond with ONLY a JSON array, no prose. Each element must be "
+            "Create a detailed, realistic daily timetable. Include specific blocks for: "
+            "morning routine (wake, breakfast, exercise), focused work sessions, breaks, "
+            "meals, study time, communication with contacts, and wind-down. "
+            "Respond with ONLY a JSON array, no prose. Each element must be "
             '{"start":"HH:MM","end":"HH:MM","title":"...","busy":true}. Use 24-hour times, '
-            "order them through the day, leave short gaps between blocks, and set busy=false "
-            "for breaks/free time." + extra + "Tasks for today:\n" + text
+            "order them through the day, leave short gaps between blocks, set busy=false "
+            "for breaks/free time, and make the schedule feel natural and human." + extra + "Tasks for today:\n" + text
         )
         try:
             result = await self.ai_router.run(TaskType.GENERAL_ASSISTANT, prompt)
@@ -192,6 +260,28 @@ class TimetableManager:
         hour = max(0, min(23, hour))
         minute = max(0, min(59, minute))
         return datetime.combine(day, time(hour, minute))
+
+    async def handle_emergency(self, title: str, duration_minutes: int = 60) -> dict:
+        """Insert an emergency task into today's schedule, reshaping if needed."""
+        now = datetime.now()
+        day = now.date()
+        blocks = self.list_day(day)
+        updated, note = insert_emergency(blocks, title, duration_minutes, now)
+
+        self.conn.execute("DELETE FROM timetable WHERE day=?", (day.isoformat(),))
+        now_dt = datetime.utcnow()
+        for b in updated:
+            self.conn.execute(
+                "INSERT INTO timetable (day, start, end, title, busy, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (day.isoformat(), b.start.isoformat(), b.end.isoformat(),
+                 b.title, int(b.busy), now_dt.isoformat()),
+            )
+        self.conn.commit()
+
+        return {
+            "note": note,
+            "blocks": self.list_day(day),
+        }
 
     @staticmethod
     def _row_to_block(row: sqlite3.Row) -> TimeBlock:

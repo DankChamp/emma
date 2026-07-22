@@ -13,7 +13,9 @@ class TaskCreate(BaseModel):
     title: str
     project: Optional[str] = None
     priority: str = "medium"
-    deadline: Optional[str] = None  # ISO date "2026-07-21" or datetime
+    deadline: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    milestone_id: Optional[int] = None
 
 
 class TaskUpdate(BaseModel):
@@ -21,6 +23,8 @@ class TaskUpdate(BaseModel):
     project: Optional[str] = None
     priority: Optional[str] = None
     deadline: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    milestone_id: Optional[int] = None
 
 
 @router.get("")
@@ -39,14 +43,18 @@ def create_task(payload: TaskCreate, tasks: TaskManager = Depends(get_task_manag
     if not payload.title.strip():
         raise HTTPException(400, "Task title is required")
     return tasks.create(payload.title, project=payload.project,
-                        priority=payload.priority, deadline=payload.deadline)
+                        priority=payload.priority, deadline=payload.deadline,
+                        estimated_hours=payload.estimated_hours,
+                        milestone_id=payload.milestone_id)
 
 
 @router.patch("/{task_id}")
 def update_task(task_id: int, payload: TaskUpdate,
                 tasks: TaskManager = Depends(get_task_manager)):
     updated = tasks.update(task_id, title=payload.title, project=payload.project,
-                           priority=payload.priority, deadline=payload.deadline)
+                           priority=payload.priority, deadline=payload.deadline,
+                           estimated_hours=payload.estimated_hours,
+                           milestone_id=payload.milestone_id)
     if not updated:
         raise HTTPException(404, f"No task with id {task_id}")
     return updated

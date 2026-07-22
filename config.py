@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     schedule_db_path: Path = DATA_DIR / "schedule.db"
     tasks_db_path: Path = DATA_DIR / "tasks.db"
     reminders_db_path: Path = DATA_DIR / "reminders.db"
+    profile_db_path: Path = DATA_DIR / "profile.db"
 
     # --- Provider credentials (leave blank to disable a provider) ---
     groq_api_key: Optional[str] = None
@@ -96,6 +97,7 @@ class Settings(BaseSettings):
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
     notifications_db_path: Path = DATA_DIR / "notifications.db"
+    appointments_db_path: Path = DATA_DIR / "appointments.db"
 
 
 @lru_cache

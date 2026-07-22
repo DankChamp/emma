@@ -18,12 +18,22 @@ from fastapi import Depends
 from config import Settings, get_settings
 from core.busy_mode import BusyModeManager
 from core.memory import MemoryManager
-from core.notifications import NotificationManager, TelegramMessenger
+from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
 from core.router import AIRouter
 from core.schedule import TimetableManager
 from core.selfcare import DiagnosticsManager, UpdateManager
 from core.tasks import TaskManager
+from core.profile import ProfileManager
 from core.reminders import ReminderManager
+from core.tasks.project_manager import ProjectManager
+
+
+def get_profile_manager(settings: Settings = Depends(get_settings)) -> ProfileManager:
+    return ProfileManager(settings.profile_db_path)
+
+
+def get_project_manager(settings: Settings = Depends(get_settings)) -> ProjectManager:
+    return ProjectManager(settings.tasks_db_path)
 
 
 def get_memory_manager(settings: Settings = Depends(get_settings)) -> MemoryManager:
@@ -67,6 +77,10 @@ def get_notification_manager() -> NotificationManager:
 def get_diagnostics_manager(settings: Settings = Depends(get_settings)) -> DiagnosticsManager:
     from config import BASE_DIR
     return DiagnosticsManager(BASE_DIR)
+
+
+def get_appointment_manager(settings: Settings = Depends(get_settings)) -> AppointmentManager:
+    return AppointmentManager(settings.appointments_db_path)
 
 
 def get_update_manager(settings: Settings = Depends(get_settings)) -> UpdateManager:

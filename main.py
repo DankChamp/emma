@@ -19,11 +19,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api.routes import chat, memory, notifications, planning, reminders, schedule, status, selfcare, tasks
+from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks
 from api.routes import settings as settings_routes
 from config import get_settings
 from core.busy_mode import BusyModeManager
-from core.notifications import NotificationManager, TelegramMessenger
+from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
 from core.reminders import ReminderManager
 from core.persistence import hf_backup
 from core.router import AIRouter
@@ -43,8 +43,10 @@ scheduler = AsyncIOScheduler()
 busy_mode = BusyModeManager(settings.busy_mode_db_path)
 telegram = TelegramMessenger(settings.telegram_bot_token or "")
 notifications_mgr = NotificationManager(settings.notifications_db_path, telegram=telegram)
+appointment_mgr = AppointmentManager(settings.appointments_db_path)
 telegram._notify_mgr = notifications_mgr
 telegram._busy_mgr = busy_mode
+telegram._appointment_mgr = appointment_mgr
 
 ai_router = AIRouter(settings)
 timetable = TimetableManager(settings.schedule_db_path, ai_router=ai_router)
@@ -114,6 +116,9 @@ app.include_router(schedule.router)
 app.include_router(chat.router)
 app.include_router(memory.router)
 app.include_router(tasks.router)
+app.include_router(profile.router)
+app.include_router(projects.router)
+app.include_router(appointments.router)
 app.include_router(reminders.router)
 app.include_router(planning.router)
 app.include_router(status.router)

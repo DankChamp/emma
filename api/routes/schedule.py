@@ -7,9 +7,13 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api.deps import get_memory_manager, get_timetable_manager
+from api.deps import get_appointment_manager, get_memory_manager, get_notification_manager, get_profile_manager, get_project_manager, get_task_manager, get_timetable_manager
 from core.memory import MemoryManager
+from core.notifications import AppointmentManager, NotificationManager
+from core.profile import ProfileManager
 from core.schedule import TimetableManager
+from core.tasks import TaskManager
+from core.tasks.project_manager import ProjectManager
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
@@ -84,7 +88,75 @@ async def build_day(
     )
 
 
+class Build3DayRequest(BaseModel):
+    text: str
+    include_tasks: bool = True
+    include_study: bool = True
+
+
+@router.post("/build-3day")
+async def build_3day(
+    payload: Build3DayRequest,
+    timetable: TimetableManager = Depends(get_timetable_manager),
+    memory: MemoryManager = Depends(get_memory_manager),
+    profile: ProfileManager = Depends(get_profile_manager),
+    tasks: TaskManager = Depends(get_task_manager),
+    pm: ProjectManager = Depends(get_project_manager),
+    am: AppointmentManager = Depends(get_appointment_manager),
+    nm: NotificationManager = Depends(get_notification_manager),
+):
+    profile_data = profile.get_all()
+    pending_tasks = tasks.list(status="pending") if payload.include_tasks else None
+    study_summary = pm.study_summary(days=7) if payload.include_study else None
+
+    contacts = nm.list_users()
+    contacts_text = ""
+    if contacts:
+        lines = ["People to talk to:"]
+        for c in contacts:
+            lines.append(f"- {c['label']} ({c['role']}, priority: {c['priority']})")
+        contacts_text = "\n".join(lines)
+
+    pending_appointments = am.list(status="pending")
+    appointments_text = ""
+    if pending_appointments:
+        lines = ["Pending appointments:"]
+        for a in pending_appointments:
+            lines.append(f"- {a['person_label']}: {a['day']} {a['start']}-{a['end']} ({a['title']})")
+        appointments_text = "\n".join(lines)
+
+    context_parts = []
+    lt = memory.get_long_term_text()
+    if lt.strip():
+        context_parts.append(f"Long-term context:\n{lt}")
+    dt = memory.get_daily_text()
+    if dt.strip():
+        context_parts.append(f"Notes:\n{dt}")
+    memory_context = "\n\n".join(context_parts) if context_parts else None
+
+    return await timetable.build_multi_day(
+        payload.text, days=3,
+        profile=profile_data,
+        pending_tasks=pending_tasks,
+        study_summary=study_summary,
+        contacts_text=contacts_text,
+        appointments_text=appointments_text,
+        memory_context=memory_context,
+    )
+
+
 @router.post("/delete")
 def delete_day(payload: DeleteDayRequest, timetable: TimetableManager = Depends(get_timetable_manager)):
     timetable.delete_day(_parse_day(payload.day))
     return {"ok": True}
+
+
+class EmergencyRequest(BaseModel):
+    title: str
+    duration_minutes: int = 60
+
+
+@router.post("/emergency")
+async def handle_emergency(payload: EmergencyRequest,
+                           timetable: TimetableManager = Depends(get_timetable_manager)):
+    return await timetable.handle_emergency(payload.title, payload.duration_minutes)
