@@ -184,7 +184,7 @@ class NotificationManager:
         """
         if not self.telegram:
             return 0
-        owner = getattr(self.telegram, "_owner_name", "Champ")
+        owner = getattr(self.telegram, "_owner_name", "VOID")
         free_hint = self._free_hint()
         note_txt = f" ({note})" if note else ""
         sent = 0
@@ -229,7 +229,7 @@ class NotificationManager:
             return None
 
     @staticmethod
-    def _default_busy(note_txt: str, free_hint: Optional[str], owner: str = "Champ") -> str:
+    def _default_busy(note_txt: str, free_hint: Optional[str], owner: str = "VOID") -> str:
         base = f"Heads up — {owner} is busy right now{note_txt}. He'll get back to you when he's free."
         if free_hint and free_hint.startswith("after"):
             base += f" You should be able to reach him {free_hint}."

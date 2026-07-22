@@ -73,7 +73,7 @@ class TelegramMessenger(MessengerAdapter):
     def __init__(
         self,
         bot_token: str,
-        owner_name: str = "Champ",
+        owner_name: str = "VOID",
         owner_telegram_id: Optional[int] = None,
         notify_manager=None,
         busy_manager=None,
