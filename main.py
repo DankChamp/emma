@@ -72,9 +72,11 @@ async def _reminder_sweep() -> None:
 
 async def _send_block_notification(title: str, block_start: datetime) -> None:
     """Called when a scheduled block's start time arrives."""
-    await notifications_mgr.notify_user(
-        "champ", f"⏰ {title} starts now"
+    sent = await notifications_mgr.notify_owner(
+        f"⏰ {title} starts now"
     )
+    if not sent:
+        logger.warning("Block notification not delivered — owner has no chat_id yet.")
 
 
 def _schedule_block_notification(title: str, block_start: datetime) -> None:
