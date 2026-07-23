@@ -62,8 +62,20 @@ class TimetableManager:
 
     def set_day(self, day: date, blocks: list[dict], create_reminders: bool = False) -> list[TimeBlock]:
         now_dt = datetime.utcnow()
+        # Sort by start time before saving
+        sorted_blocks = sorted(blocks, key=lambda b: b.get("start", "00:00"))
+        # Detect overlaps
+        for i in range(1, len(sorted_blocks)):
+            prev_end = sorted_blocks[i - 1].get("end") or sorted_blocks[i - 1].get("start", "00:00")
+            cur_start = sorted_blocks[i].get("start", "00:00")
+            if cur_start < prev_end:
+                logger.warning(
+                    "Overlapping blocks on %s: '%s' ends at %s but '%s' starts at %s",
+                    day, sorted_blocks[i - 1].get("title", "Busy"), prev_end,
+                    sorted_blocks[i].get("title", "Busy"), cur_start,
+                )
         self.conn.execute("DELETE FROM timetable WHERE day=?", (day.isoformat(),))
-        for b in blocks:
+        for b in sorted_blocks:
             start = self._combine(day, b["start"])
             end = self._combine(day, b.get("end") or b["start"])
             self.conn.execute(
