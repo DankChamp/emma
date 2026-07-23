@@ -11,7 +11,7 @@ Everything else stays per-request (see api/deps.py). No business logic here.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -94,10 +94,38 @@ def _schedule_block_notification(title: str, block_start: datetime) -> None:
 timetable.set_block_notify_callback(_schedule_block_notification)
 
 
+async def _schedule_block_sweep() -> None:
+    """Re-create block notification jobs after restart so they aren't lost."""
+    try:
+        now = datetime.now()
+        for days_offset in (0, 1):
+            day = date.today() + timedelta(days=days_offset)
+            for block in timetable.list_day(day):
+                if not block.busy or block.start <= now:
+                    continue
+                job_id = f"block-{block.start.isoformat()}"
+                if scheduler.get_job(job_id):
+                    continue
+                scheduler.add_job(
+                    _send_block_notification,
+                    'date',
+                    run_date=block.start,
+                    args=[block.title, block.start],
+                    id=job_id,
+                    replace_existing=True,
+                )
+                logger.info("Re-created block notification: %s at %s", block.title, block.start)
+    except Exception as exc:
+        logger.warning("Schedule block sweep failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
+    await _schedule_block_sweep()
     scheduler.add_job(_reminder_sweep, "interval", seconds=30, id="reminder-sweep",
+                      replace_existing=True)
+    scheduler.add_job(_schedule_block_sweep, "interval", minutes=5, id="schedule-block-sweep",
                       replace_existing=True)
     if hf_backup.enabled:
         scheduler.add_job(hf_backup.upload, "interval", minutes=10,
