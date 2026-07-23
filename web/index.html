@@ -15,25 +15,19 @@
   --accent: #00e5ff;
   --accent-hover: #66f0ff;
   --accent-dim: rgba(0, 229, 255, 0.12);
-  --red: #ff1744;
-  --red-dim: rgba(255, 23, 68, 0.12);
+  --pink: #ff00aa;
+  --pink-dim: rgba(255, 0, 170, 0.12);
   --ok: #00e5ff;
   --warn: #ffd600;
-  --err: #ff1744;
+  --err: #ff00aa;
   --font: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
   --mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   background: var(--bg); color: var(--text); font-family: var(--font);
-  display: flex; height: 100vh; overflow: hidden; position: relative;
+  display: flex; height: 100vh; overflow: hidden;   position: relative;
 }
-body::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.015) 2px, rgba(0,229,255,0.015) 4px);
-}
-#rain-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 9998; opacity: 0.12; }
-
 .sidebar {
   width: 220px; min-width: 220px; background: var(--bg-elevated);
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
@@ -46,9 +40,9 @@ body::after {
   letter-spacing: 4px;
 }
 .brand-sub {
-  font-family: var(--mono); font-size: 10px; color: var(--red);
+  font-family: var(--mono); font-size: 10px; color: var(--pink);
   padding: 0 16px 18px; letter-spacing: 3px;
-  text-shadow: 0 0 8px rgba(255,23,68,0.4);
+  text-shadow: 0 0 8px rgba(255,0,170,0.4);
 }
 .nav { list-style: none; padding: 8px; flex: 1; overflow-y: auto; }
 .nav li {
@@ -95,8 +89,8 @@ button:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 
 button:disabled { opacity: 0.3; cursor: default; }
 button.primary { border-color: var(--accent); color: var(--accent); }
 button.primary:hover { background: rgba(0,229,255,0.1); box-shadow: 0 0 15px rgba(0,229,255,0.15); }
-button.danger { border-color: var(--red); color: var(--red); }
-button.danger:hover { background: rgba(255,23,68,0.1); box-shadow: 0 0 15px rgba(255,23,68,0.15); }
+button.danger { border-color: var(--pink); color: var(--pink); }
+button.danger:hover { background: rgba(255,0,170,0.1); box-shadow: 0 0 15px rgba(255,0,170,0.15); }
 button.ok { border-color: var(--ok); color: var(--ok); }
 button.ok:hover { background: rgba(0,229,255,0.1); box-shadow: 0 0 15px rgba(0,229,255,0.15); }
 
@@ -137,7 +131,7 @@ td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
 
 pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
 
-.section-title { font-size: 11px; font-weight: 600; color: var(--red); letter-spacing: 2px; text-transform: uppercase; padding: 4px 2px; margin-bottom: 8px; text-shadow: 0 0 5px rgba(255,23,68,0.2); }
+.section-title { font-size: 11px; font-weight: 600; color: var(--pink); letter-spacing: 2px; text-transform: uppercase; padding: 4px 2px; margin-bottom: 8px; text-shadow: 0 0 5px rgba(255,0,170,0.2); }
 
 .tab-btn {
   background: transparent; border: 1px solid var(--border);
@@ -179,7 +173,6 @@ body.is-local .local-only { display: revert !important; }
 </div>
 
 <div class="main">
-  <canvas id="rain-canvas"></canvas>
   <!-- ===== CHAT ===== -->
   <div class="page active" id="page-chat">
     <div class="page-title">Talk</div>
@@ -536,32 +529,6 @@ document.querySelectorAll('.nav li').forEach(li => {
 // ----- isLocal: show local-only controls on dev machine -----
 const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 if (isLocal) document.body.classList.add('is-local');
-
-// ----- Rain overlay -----
-(function initRain() {
-  const c = document.getElementById('rain-canvas');
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  let W, H;
-  function resize() { W = c.width = window.innerWidth; H = c.height = window.innerHeight; }
-  resize(); window.addEventListener('resize', resize);
-  const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
-  const cols = Math.floor(W / 14);
-  const drops = Array(cols).fill(0).map(() => Math.random() * H);
-  function draw() {
-    ctx.fillStyle = 'rgba(5,5,16,0.05)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#00e5ff';
-    ctx.font = '14px monospace';
-    for (let i = 0; i < drops.length; i++) {
-      const ch = chars[Math.floor(Math.random() * chars.length)];
-      ctx.fillText(ch, i * 14, drops[i]);
-      if (drops[i] > H && Math.random() > 0.975) drops[i] = 0;
-      drops[i] += 14;
-    }
-  }
-  setInterval(draw, 50);
-})();
 
 // ----- Session select management -----
 async function loadSessionsSelect() {
