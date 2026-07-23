@@ -70,8 +70,13 @@ async def _reminder_sweep() -> None:
         logger.warning("Reminder sweep failed: %s", exc)
 
 
+AUTO_BUSY_PREFIX = "📅 "
+
 async def _send_block_notification(title: str, block_start: datetime) -> None:
     """Called when a scheduled block's start time arrives."""
+    state = busy_mode.get_state()
+    if not state.is_busy:
+        await busy_mode.go_busy(note=f"{AUTO_BUSY_PREFIX}{title}")
     sent = await notifications_mgr.notify_owner(
         f"⏰ {title} starts now"
     )
@@ -95,9 +100,20 @@ timetable.set_block_notify_callback(_schedule_block_notification)
 
 
 async def _schedule_block_sweep() -> None:
-    """Re-create block notification jobs after restart so they aren't lost."""
+    """Re-create block notification jobs + sync busy mode with timetable."""
     try:
         now = datetime.now()
+        # --- Sync busy mode ---
+        state = busy_mode.get_state()
+        busy_block = timetable.current_busy_block(now)
+        if busy_block and not state.is_busy:
+            note = f"{AUTO_BUSY_PREFIX}{busy_block.title}"
+            await busy_mode.go_busy(note=note)
+            logger.info("Auto busy: %s", busy_block.title)
+        elif not busy_block and state.is_busy and state.note and state.note.startswith(AUTO_BUSY_PREFIX):
+            await busy_mode.go_free()
+            logger.info("Auto free — no busy block in schedule.")
+        # --- Re-create notification jobs after restart ---
         for days_offset in (0, 1):
             day = date.today() + timedelta(days=days_offset)
             for block in timetable.list_day(day):
