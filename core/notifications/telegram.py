@@ -125,7 +125,7 @@ class TelegramMessenger(MessengerAdapter):
         if is_owner:
             buttons.extend([
                 [InlineKeyboardButton("\U0001f4e5 Pending requests", callback_data="pending")],
-                [InlineKeyboardButton("\u2699\ufe0f My status", callback_data="status")],
+                [InlineKeyboardButton(f"\u2699\ufe0f {self._owner_name}'s status", callback_data="status")],
             ])
         return InlineKeyboardMarkup(buttons)
 
