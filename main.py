@@ -14,6 +14,7 @@ import logging
 from datetime import date, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -36,6 +37,12 @@ settings = get_settings()
 # On ephemeral hosts (HF Spaces) pull the last data/*.db snapshot before any
 # manager opens its database. No-op unless EMMA_HF_BACKUP_REPO + HF_TOKEN set.
 hf_backup.restore()
+
+TZ = ZoneInfo(settings.tz)
+
+def _local_to_utc(dt: datetime) -> datetime:
+    """Convert a local naive datetime to UTC naive for APScheduler."""
+    return dt.replace(tzinfo=TZ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 scheduler = AsyncIOScheduler()
 
@@ -77,8 +84,9 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
     state = busy_mode.get_state()
     if not state.is_busy:
         await busy_mode.go_busy(note=f"{AUTO_BUSY_PREFIX}{title}")
+    t = block_start.strftime("%H:%M")
     sent = await notifications_mgr.notify_owner(
-        f"⏰ {title} starts now"
+        f"⏰ {t} — {title}"
     )
     if not sent:
         logger.warning("Block notification not delivered — owner has no chat_id yet.")
@@ -86,10 +94,11 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
 
 def _schedule_block_notification(title: str, block_start: datetime) -> None:
     """Queue a Telegram notification for the start of a future block."""
+    utc_start = _local_to_utc(block_start)
     scheduler.add_job(
         _send_block_notification,
         'date',
-        run_date=block_start,
+        run_date=utc_start,
         args=[title, block_start],
         id=f"block-{block_start.isoformat()}",
         replace_existing=True,
@@ -122,15 +131,16 @@ async def _schedule_block_sweep() -> None:
                 job_id = f"block-{block.start.isoformat()}"
                 if scheduler.get_job(job_id):
                     continue
+                utc_start = _local_to_utc(block.start)
                 scheduler.add_job(
                     _send_block_notification,
                     'date',
-                    run_date=block.start,
+                    run_date=utc_start,
                     args=[block.title, block.start],
                     id=job_id,
                     replace_existing=True,
                 )
-                logger.info("Re-created block notification: %s at %s", block.title, block.start)
+                logger.info("Re-created block notification: %s at %s", block.title, block.start.strftime("%H:%M"))
     except Exception as exc:
         logger.warning("Schedule block sweep failed: %s", exc)
 

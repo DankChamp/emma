@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     voice_tts_rate: int = 175
     voice_tts_voice: Optional[str] = None  # substring match against pyttsx3 voice names/ids
 
+    # --- Time zone (IANA name like Asia/Kolkata, America/New_York) ---
+    # Used to correctly schedule notifications from local timetable times.
+    tz: str = "Asia/Kolkata"
+
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
     owner_name: str = "VOID"
