@@ -26,6 +26,28 @@ from .models import TimeBlock
 
 logger = logging.getLogger("emma.schedule")
 
+
+def _normalise_time(s: str) -> str:
+    """Convert '6:30 PM' or '06:30AM' to '18:30' (24-hour)."""
+    raw = s.strip().upper()
+    pm = "PM" in raw
+    am = "AM" in raw
+    raw = raw.replace("AM", "").replace("PM", "").strip()
+    # Accept : or . as separator
+    sep = ":" if ":" in raw else "."
+    parts = raw.split(sep)
+    try:
+        h = int(parts[0])
+    except (ValueError, IndexError):
+        return s[:5]
+    if pm and h < 12:
+        h += 12
+    if am and h == 12:
+        h = 0
+    m = int(parts[1][:2]) if len(parts) > 1 else 0
+    return f"{h:02d}:{m:02d}"
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS timetable (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,8 +234,9 @@ class TimetableManager:
             "morning routine (wake, breakfast, exercise), focused work sessions, breaks, "
             "meals, study time, communication with contacts, and wind-down. "
             "Respond with ONLY a JSON array, no prose. Each element must be "
-            '{"start":"HH:MM","end":"HH:MM","title":"...","busy":true}. Use 24-hour times, '
-            "order them through the day, leave short gaps between blocks, set busy=false "
+            '{"start":"HH:MM","end":"HH:MM","title":"...","busy":true}. '
+            "Use 24-hour times (e.g. 14:30 not 2:30 PM). "
+            "Order them through the day, leave short gaps between blocks, set busy=false "
             "for breaks/free time, and make the schedule feel natural and human." + extra + "Tasks for today:\n" + text
         )
         try:
@@ -238,9 +261,14 @@ class TimetableManager:
         for item in data:
             if not isinstance(item, dict) or "start" not in item:
                 continue
+            start_raw = str(item["start"])
+            end_raw = str(item.get("end") or item["start"])
+            # Normalise AM/PM → 24-hour before truncation
+            start_raw = _normalise_time(start_raw)
+            end_raw = _normalise_time(end_raw)
             blocks.append({
-                "start": str(item["start"])[:5],
-                "end": str(item.get("end") or item["start"])[:5],
+                "start": start_raw[:5],
+                "end": end_raw[:5],
                 "title": str(item.get("title", "")).strip() or "Busy",
                 "busy": bool(item.get("busy", True)),
             })
@@ -265,10 +293,16 @@ class TimetableManager:
 
     @staticmethod
     def _combine(day: date, hhmm: str) -> datetime:
-        hhmm = hhmm.strip()
-        parts = hhmm.split(":")
+        raw = hhmm.strip().upper()
+        pm = "PM" in raw
+        raw = raw.replace("AM", "").replace("PM", "").strip()
+        parts = raw.split(":")
         hour = int(parts[0]) if parts and parts[0].isdigit() else 0
         minute = int(parts[1]) if len(parts) > 1 and parts[1][:2].isdigit() else 0
+        if pm and hour < 12:
+            hour += 12
+        if not pm and hour == 12:
+            hour = 0
         hour = max(0, min(23, hour))
         minute = max(0, min(59, minute))
         return datetime.combine(day, time(hour, minute))
