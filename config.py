@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     # Used to correctly schedule notifications from local timetable times.
     tz: str = "Asia/Kolkata"
 
+    # --- Web UI password protection ---
+    # If set, the web UI and API require this password to access.
+    web_password: Optional[str] = None
+
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
     owner_name: str = "VOID"

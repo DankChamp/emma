@@ -157,6 +157,14 @@ body.is-local .local-only { display: revert !important; }
 </head>
 <body>
 
+<div id="login-overlay" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+  <div class="brand" style="font-size:28px;padding:0">EMMA</div>
+  <div class="brand-sub" style="text-align:center">PERSONAL OS // VOID</div>
+  <input id="login-password" type="password" placeholder="Password" style="width:260px;text-align:center" autofocus>
+  <button id="login-btn" class="primary" style="width:260px">Unlock</button>
+  <p id="login-error" class="text-sm" style="color:var(--err);display:none"></p>
+</div>
+
 <div class="sidebar">
   <div class="brand">EMMA</div>
   <div class="brand-sub">PERSONAL OS // VOID</div>
@@ -478,13 +486,19 @@ if (location.protocol === 'file:') {
 }
 
 const API = '';
+let authToken = sessionStorage.getItem('emma_token') || '';
 
 async function api(method, path, body) {
   const opts = { method, headers: {} };
+  if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   try {
     const r = await fetch(API + path, opts);
-    if (!r.ok) { const e = await r.json().catch(() => ({detail: r.statusText})); throw new Error(e.detail || r.statusText); }
+    if (!r.ok) {
+      if (r.status === 401) { sessionStorage.removeItem('emma_token'); showLogin(); }
+      const e = await r.json().catch(() => ({detail: r.statusText}));
+      throw new Error(e.detail || r.statusText);
+    }
     return await r.json();
   } catch (e) {
     if (e instanceof TypeError && e.message.includes('fetch')) {
@@ -493,6 +507,46 @@ async function api(method, path, body) {
     throw e;
   }
 }
+
+// ---- Auth / login ----
+async function checkAuth() {
+  try {
+    const health = await api('GET', '/health');
+    if (!health.auth_required) return;
+    if (!authToken) { showLogin(); return; }
+  } catch { showLogin(); }
+}
+
+function showLogin() {
+  const overlay = document.getElementById('login-overlay');
+  overlay.style.display = 'flex';
+  document.getElementById('login-password').focus();
+}
+
+document.getElementById('login-btn').addEventListener('click', async () => {
+  const pw = document.getElementById('login-password').value.trim();
+  if (!pw) return;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  try {
+    const r = await fetch(API + '/api/auth', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pw}),
+    });
+    if (!r.ok) { errEl.textContent = 'Wrong password'; errEl.style.display = 'block'; return; }
+    await r.json();
+    authToken = pw;
+    sessionStorage.setItem('emma_token', pw);
+    document.getElementById('login-overlay').style.display = 'none';
+  } catch { errEl.textContent = 'Cannot reach server'; errEl.style.display = 'block'; }
+});
+
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('login-btn').click();
+});
+
+// Check auth before anything else
+checkAuth();
 function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function showStatus(el, msg, color) {
   el.textContent = msg;

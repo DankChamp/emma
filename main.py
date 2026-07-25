@@ -17,7 +17,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks
@@ -200,9 +201,39 @@ def root():
 def health():
     return {
         "ok": True,
+        "auth_required": bool(settings.web_password),
         "telegram": {
             "configured": bool(settings.telegram_bot_token),
             "running": telegram.is_running,
             "error": telegram.error,
         },
     }
+
+
+# ---- Auth middleware (protects API + UI) ----
+from pydantic import BaseModel
+
+class LoginRequest(BaseModel):
+    password: str
+
+@app.post("/api/auth")
+def login(payload: LoginRequest):
+    if settings.web_password and payload.password == settings.web_password:
+        return {"ok": True}
+    raise HTTPException(401, "Wrong password")
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if not settings.web_password:
+        return await call_next(request)
+    # Public paths
+    if request.url.path in ("/", "/health", "/api/auth"):
+        return await call_next(request)
+    # Check Authorization header
+    auth = request.headers.get("Authorization", "")
+    if auth == f"Bearer {settings.web_password}":
+        return await call_next(request)
+    # Check cookie (set by frontend after login)
+    if request.cookies.get("emma_token") == settings.web_password:
+        return await call_next(request)
+    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
