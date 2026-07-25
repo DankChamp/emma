@@ -230,7 +230,7 @@ async def auth_middleware(request: Request, call_next):
     if not settings.web_password:
         return await call_next(request)
     # Public paths
-    if request.url.path in ("/", "/health", "/api/auth"):
+    if request.url.path in ("/", "/health", "/api/auth") or request.url.path.startswith("/ui/"):
         return await call_next(request)
     # Check Authorization header
     auth = request.headers.get("Authorization", "")
