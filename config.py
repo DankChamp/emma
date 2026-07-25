@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -102,7 +102,10 @@ class Settings(BaseSettings):
     # --- Web UI password protection ---
     # If set, the web UI and API require this password to access.
     # Set via WEB_PASSWORD or EMMA_WEB_PASSWORD env var.
-    web_password: Optional[str] = Field(None, env=["WEB_PASSWORD", "EMMA_WEB_PASSWORD"])
+    web_password: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("WEB_PASSWORD", "EMMA_WEB_PASSWORD"),
+    )
 
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None

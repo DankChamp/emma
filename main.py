@@ -221,8 +221,10 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth")
 def login(payload: LoginRequest):
+    logger.info("login attempt — password set=%s", bool(settings.web_password))
     if settings.web_password and payload.password == settings.web_password:
         return {"ok": True}
+    logger.warning("login failed — wrong password")
     raise HTTPException(401, "Wrong password")
 
 @app.middleware("http")
