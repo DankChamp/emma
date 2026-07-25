@@ -65,9 +65,7 @@ _DEFAULT_START_HOUR = 9
 
 
 def format_time(dt: datetime) -> str:
-    h = dt.hour % 12 or 12
-    ampm = "AM" if dt.hour < 12 else "PM"
-    return f"{h}:{dt.minute:02d} {ampm}"
+    return f"{dt.hour:02d}:{dt.minute:02d}"
 
 
 class TimetableManager:

@@ -85,6 +85,7 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
     state = busy_mode.get_state()
     if not state.is_busy:
         await busy_mode.go_busy(note=f"{AUTO_BUSY_PREFIX}{title}")
+        await notifications_mgr.broadcast_availability(is_busy=True, note=title)
     t = block_start.strftime("%H:%M")
     sent = await notifications_mgr.notify_owner(
         f"⏰ {t} — {title}"
@@ -119,9 +120,11 @@ async def _schedule_block_sweep() -> None:
         if busy_block and not state.is_busy:
             note = f"{AUTO_BUSY_PREFIX}{busy_block.title}"
             await busy_mode.go_busy(note=note)
+            await notifications_mgr.broadcast_availability(is_busy=True, note=busy_block.title)
             logger.info("Auto busy: %s", busy_block.title)
         elif not busy_block and state.is_busy and state.note and state.note.startswith(AUTO_BUSY_PREFIX):
             await busy_mode.go_free()
+            await notifications_mgr.broadcast_availability(is_busy=False)
             logger.info("Auto free — no busy block in schedule.")
         # --- Re-create notification jobs after restart ---
         for days_offset in (0, 1):
