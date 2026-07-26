@@ -553,10 +553,15 @@ class TelegramMessenger(MessengerAdapter):
 
             # If owner is busy and caller is not high-priority/owner:
             # use the fast non-AI reply (no LLM cost)
-            state = self._busy_mgr.get_state() if self._busy_mgr else None
+            try:
+                state = self._busy_mgr.get_state() if self._busy_mgr else None
+            except Exception:
+                state = None
             is_busy = bool(state and state.is_busy)
             if is_busy and not self._is_owner(uid):
-                priority = self._notify_mgr.get_priority(uid) if self._notify_mgr else "normal"
+                priority = "normal"
+                if self._notify_mgr:
+                    priority = self._notify_mgr.get_priority(uid) or "normal"
                 if priority != "high":
                     await self._reply_status(update, uid, name, text)
                     return
@@ -572,7 +577,7 @@ class TelegramMessenger(MessengerAdapter):
             # Rate limit check
             if not self._check_rate_limit(uid):
                 await update.message.reply_text(
-                    "You've sent too many messages. Please wait a while and try again."
+                    "You've sent too many messages. Please wait an hour and try again."
                 )
                 return
 
@@ -790,32 +795,29 @@ class TelegramMessenger(MessengerAdapter):
         note_str = f" ({ctx['busy_note']})" if ctx["busy_note"] else ""
         return (
             f"You are Emma, a scheduling assistant for {ctx['owner_name']}. "
-            f"You ONLY handle the following topics:\n"
-            f"1. Checking if {ctx['owner_name']} is busy or free\n"
-            f"2. Booking appointments with {ctx['owner_name']}\n"
-            f"3. Listing available time slots\n"
-            f"4. Viewing or canceling the caller's own bookings\n"
+            f"You ONLY handle:\n"
+            f"1. Check if {ctx['owner_name']} is busy/free\n"
+            f"2. Book appointments\n"
+            f"3. List free slots\n"
+            f"4. View/cancel caller's bookings\n"
             f"5. Pending requests (owner only)\n\n"
-            f"Current context:\n"
-            f"- {ctx['owner_name']} is currently: {busy_str}{note_str}\n"
-            f"- Today's date: {ctx['today']}\n"
-            f"- Current time: {ctx['now']}\n"
-            f"- Caller name: {ctx['caller_name']}\n"
-            f"- Owner Telegram ID: {ctx.get('owner_telegram_id', 'not set')}\n\n"
-            f"Available actions (include ONE at the end of your response when needed):\n"
-            f"[ACTION: status] — check if owner is busy\n"
-            f"[ACTION: slots today|tomorrow|YYYY-MM-DD] — list free slots\n"
-            f"[ACTION: book DURATION DAY TIME] — book (e.g. book 1h 2026-07-27 14:00)\n"
-            f"[ACTION: mybookings] — list the caller's bookings\n"
-            f"[ACTION: cancel ID] — cancel a booking by its ID number\n\n"
-            f"STRICT RULES:\n"
-            f"- NEVER engage in general conversation, chit-chat, jokes, or non-schedule topics.\n"
-            f"- If the message is off-topic, reply: \"I can only help with {ctx['owner_name']}'s schedule. Send /help to see available commands.\"\n"
-            f"- Keep responses under 3 sentences, friendly but professional.\n"
-            f"- Only include [ACTION:] if the user clearly wants to DO something.\n"
-            f"- For greetings like \"hi\", \"hello\", respond briefly and invite them to ask about the schedule.\n"
-            f"- If you don't understand, tell them to use /help.\n"
-            f"- NEVER make up information about availability or bookings — only use what's given here."
+            f"Context:\n"
+            f"- {ctx['owner_name']}: {busy_str}{note_str}\n"
+            f"- Today: {ctx['today']} {ctx['now']}\n"
+            f"- Caller: {ctx['caller_name']}\n\n"
+            f"Actions (put ONE at end of your response):\n"
+            f"[ACTION: status]\n"
+            f"[ACTION: slots today|tomorrow|YYYY-MM-DD]\n"
+            f"[ACTION: book DURATION DAY TIME]  e.g. book 1h 2026-07-27 14:00\n"
+            f"[ACTION: mybookings]\n"
+            f"[ACTION: cancel ID]\n"
+            f"[ACTION: pending]  (owner only)\n\n"
+            f"RULES:\n"
+            f"- Max 3 sentences. No chit-chat. No off-topic.\n"
+            f"- If off-topic: \"I can only help with {ctx['owner_name']}'s schedule. Send /help.\"\n"
+            f"- Only use [ACTION:] when user wants to DO something.\n"
+            f"- For greetings, respond briefly then ask about the schedule.\n"
+            f"- NEVER make up availability or booking info."
         )
 
     # ------------------------------------------------------------------
@@ -828,123 +830,162 @@ class TelegramMessenger(MessengerAdapter):
         cmd, args = m.group(1).lower(), m.group(2).strip()
 
         if cmd == "status":
-            state = self._busy_mgr.get_state() if self._busy_mgr else None
-            if state and state.is_busy:
-                note = f" ({state.note})" if state.note else ""
-                return f"\U0001f6ab {self._owner_name} is currently busy{note}."
-            return f"\u2705 {self._owner_name} is currently free."
+            return self._action_status()
 
         if cmd == "slots":
-            if not self._appointment_mgr:
-                return None
-            sched = getattr(self._notify_mgr, "schedule", None)
-            if not sched:
-                return None
-            target = date.today()
-            if args in ("tomorrow",):
-                target = date.today() + timedelta(days=1)
-            elif args:
-                try:
-                    target = date.fromisoformat(args)
-                except ValueError:
-                    pass
-            blocks = sched.list_day(target)
-            free_slots = self._appointment_mgr.find_free_slots(target, blocks, 30)
-            if not free_slots:
-                return f"No free slots on {target.isoformat()}."
-            lines = [f"Free slots for {target.isoformat()}:"]
-            for s in free_slots[:10]:
-                st = datetime.fromisoformat(s["start"])
-                en = datetime.fromisoformat(s["end"])
-                lines.append(f"  {_fmt_time(st)} \u2013 {_fmt_time(en)} ({s['duration_minutes']}min)")
-            if len(free_slots) > 10:
-                lines.append(f"  ... and {len(free_slots) - 10} more")
-            return "\n".join(lines)
+            return await self._action_slots(args)
 
         if cmd == "book":
-            if not self._appointment_mgr:
-                return "Appointment system not available."
-            sched = getattr(self._notify_mgr, "schedule", None)
-            if not sched:
-                return "Schedule system not available."
-            parts = args.split()
-            if len(parts) < 3:
-                return None
-            dur_str, day_str, time_str = parts[0], parts[1], parts[2]
-            try:
-                target_day = date.fromisoformat(day_str)
-            except ValueError:
-                return None
-            dur_match = re.match(r"(\d+)h", dur_str)
-            duration_minutes = int(dur_match.group(1)) * 60 if dur_match else 60
-            dur_match_min = re.search(r"(\d+)min", dur_str)
-            if dur_match_min:
-                duration_minutes = int(dur_match_min.group(1))
-            try:
-                start_h, start_m = map(int, time_str.split(":"))
-            except ValueError:
-                return None
-            start_dt = datetime(target_day.year, target_day.month, target_day.day, start_h, start_m)
-            end_dt = start_dt + timedelta(minutes=duration_minutes)
-            # Check that the slot is actually free
-            blocks = sched.list_day(target_day)
-            free_slots = self._appointment_mgr.find_free_slots(target_day, blocks, duration_minutes)
-            slot_free = any(
-                datetime.fromisoformat(s["start"]) == start_dt
-                for s in free_slots
-            )
-            if not slot_free:
-                return f"Sorry, that slot isn't available on {target_day.isoformat()}. Try /myslots {target_day.isoformat()} to see free times."
-            self._appointment_mgr.create(
-                person_label=name,
-                person_telegram_id=uid,
-                day=target_day,
-                start=_fmt_time(start_dt),
-                end=_fmt_time(end_dt),
-                title=f"Appointment with {name}",
-                note=f"AI-booking: {dur_str} at {time_str}",
-            )
-            from_str = _fmt_time(start_dt)
-            to_str = _fmt_time(end_dt)
-            if self._notify_mgr:
-                await self._notify_mgr.notify_owner(
-                    f"\U0001f4c5 AI booking from {name}: {dur_str} on {target_day.isoformat()} at {time_str}"
-                )
-            return f"\u2705 Booked you {from_str}\u2013{to_str} on {target_day.isoformat()}. I'll notify {self._owner_name}."
+            return await self._action_book(args, uid, name)
 
         if cmd == "mybookings":
-            if not self._appointment_mgr:
-                return "Appointment system not available."
-            all_appts = self._appointment_mgr.list()
-            mine = [a for a in all_appts if a.get("person_telegram_id") == uid
-                    and a["status"] != "rejected"]
-            if not mine:
-                return "You have no upcoming bookings."
-            lines = ["\U0001f4cb Your bookings:"]
-            for a in mine:
-                lines.append(f"  #{a['id']} {a['day']} {a['start']}\u2013{a['end']} [\u2705 {a['status']}]")
-            return "\n".join(lines)
+            return self._action_mybookings(uid)
 
         if cmd == "cancel":
-            if not self._appointment_mgr:
-                return "Appointment system not available."
-            try:
-                appt_id = int(args)
-            except ValueError:
-                return None
-            appt = self._appointment_mgr.get(appt_id)
-            if not appt:
-                return f"Booking #{appt_id} not found."
-            if appt.get("person_telegram_id") != uid and not self._is_owner(uid):
-                return "That's not your booking."
-            self._appointment_mgr.delete(appt_id)
-            if self._notify_mgr:
-                await self._notify_mgr.notify_owner(
-                    f"\u274c {name} cancelled booking #{appt_id} via AI"
-                )
-            return f"\u274c Booking #{appt_id} cancelled."
+            return await self._action_cancel(args, uid, name)
+
+        if cmd == "pending":
+            return await self._action_pending(uid)
 
         return None
+
+    def _action_status(self) -> str:
+        state = self._busy_mgr.get_state() if self._busy_mgr else None
+        if state and state.is_busy:
+            note = f" ({state.note})" if state.note else ""
+            return f"\U0001f6ab {self._owner_name} is currently busy{note}."
+        return f"\u2705 {self._owner_name} is currently free."
+
+    async def _action_slots(self, args: str) -> Optional[str]:
+        if not self._appointment_mgr:
+            return None
+        sched = getattr(self._notify_mgr, "schedule", None)
+        if not sched:
+            return None
+        target = date.today()
+        clean = args.lower().strip()
+        if clean in ("tomorrow",):
+            target = date.today() + timedelta(days=1)
+        elif clean:
+            try:
+                target = date.fromisoformat(clean)
+            except ValueError:
+                pass
+        blocks = sched.list_day(target)
+        free_slots = self._appointment_mgr.find_free_slots(target, blocks, 15)
+        if not free_slots:
+            return f"No free slots on {target.isoformat()}."
+        lines = [f"Free slots for {target.isoformat()}:"]
+        for s in free_slots[:10]:
+            st = datetime.fromisoformat(s["start"])
+            en = datetime.fromisoformat(s["end"])
+            lines.append(f"  {_fmt_time(st)} \u2013 {_fmt_time(en)} ({s['duration_minutes']}min)")
+        if len(free_slots) > 10:
+            lines.append(f"  ... and {len(free_slots) - 10} more")
+        return "\n".join(lines)
+
+    async def _action_book(self, args: str, uid: int, name: str) -> Optional[str]:
+        if not self._appointment_mgr:
+            return "Appointment system not available."
+        sched = getattr(self._notify_mgr, "schedule", None)
+        if not sched:
+            return "Schedule system not available."
+
+        # Flexible parsing: extract duration, date, time from anywhere in args
+        dur_match = re.search(r"(\d+)\s*h(?:ours?)?", args)
+        dur_match_min = re.search(r"(\d+)\s*min(?:utes?)?", args)
+        duration_minutes = (int(dur_match.group(1)) * 60 if dur_match else 0) + (int(dur_match_min.group(1)) if dur_match_min else 0)
+        if duration_minutes == 0:
+            duration_minutes = 60  # default if no duration found
+
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", args)
+        if not date_match:
+            return None
+        target_day = date.fromisoformat(date_match.group(1))
+
+        time_match = re.search(r"(\d{1,2}):(\d{2})", args)
+        if not time_match:
+            return None
+        start_h, start_m = int(time_match.group(1)), int(time_match.group(2))
+
+        start_dt = datetime(target_day.year, target_day.month, target_day.day, start_h, start_m)
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+        # Check slot availability
+        blocks = sched.list_day(target_day)
+        free_slots = self._appointment_mgr.find_free_slots(target_day, blocks, duration_minutes)
+        slot_free = any(
+            datetime.fromisoformat(s["start"]) == start_dt
+            for s in free_slots
+        )
+        if not slot_free:
+            return f"Sorry, that slot isn't available on {target_day.isoformat()}. Try /myslots {target_day.isoformat()} to see free times."
+
+        self._appointment_mgr.create(
+            person_label=name,
+            person_telegram_id=uid,
+            day=target_day,
+            start=_fmt_time(start_dt),
+            end=_fmt_time(end_dt),
+            title=f"Appointment with {name}",
+            note=f"AI-booking: {args}",
+        )
+        self._log("ai_book", uid, name, f"booked {target_day} {_fmt_time(start_dt)}-{_fmt_time(end_dt)}")
+        if self._notify_mgr:
+            await self._notify_mgr.notify_owner(
+                f"\U0001f4c5 AI booking from {name}: {args}"
+            )
+        return f"\u2705 Booked you {_fmt_time(start_dt)}\u2013{_fmt_time(end_dt)} on {target_day.isoformat()}. I'll notify {self._owner_name}."
+
+    def _action_mybookings(self, uid: int) -> Optional[str]:
+        if not self._appointment_mgr:
+            return "Appointment system not available."
+        all_appts = self._appointment_mgr.list()
+        mine = [a for a in all_appts if a.get("person_telegram_id") == uid
+                and a["status"] != "rejected"]
+        if not mine:
+            return "You have no upcoming bookings."
+        lines = ["\U0001f4cb Your bookings:"]
+        for a in mine:
+            lines.append(f"  #{a['id']} {a['day']} {a['start']}\u2013{a['end']} [\u2705 {a['status']}]")
+        return "\n".join(lines)
+
+    async def _action_cancel(self, args: str, uid: int, name: str) -> Optional[str]:
+        if not self._appointment_mgr:
+            return "Appointment system not available."
+        try:
+            appt_id = int(args.strip())
+        except ValueError:
+            return None
+        appt = self._appointment_mgr.get(appt_id)
+        if not appt:
+            return f"Booking #{appt_id} not found."
+        if appt.get("person_telegram_id") != uid and not self._is_owner(uid):
+            return "That's not your booking."
+        self._appointment_mgr.delete(appt_id)
+        self._log("ai_cancel", uid, name, f"cancelled #{appt_id}")
+        if self._notify_mgr:
+            await self._notify_mgr.notify_owner(
+                f"\u274c {name} cancelled booking #{appt_id} via AI"
+            )
+        return f"\u274c Booking #{appt_id} cancelled."
+
+    async def _action_pending(self, uid: int) -> Optional[str]:
+        if not self._is_owner(uid):
+            return None
+        if not self._appointment_mgr:
+            return "Appointment system not available."
+        pending = self._appointment_mgr.list(status="pending")
+        if not pending:
+            return "No pending requests."
+        lines = ["\U0001f4e5 Pending requests:"]
+        for a in pending:
+            lines.append(
+                f"  #{a['id']} \u2014 {a['person_label']}"
+                f"  {a['day']} {a['start']}\u2013{a['end']}"
+                f"  /confirm {a['id']}  /reject {a['id']}"
+            )
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Off-topic guard
@@ -952,7 +993,8 @@ class TelegramMessenger(MessengerAdapter):
     _SCHEDULE_KEYWORDS = {
         "free", "busy", "book", "slot", "schedule", "appointment", "available",
         "cancel", "booking", "meeting", "time", "when", "today", "tomorrow",
-        "mybookings", "pending", "help", "hi", "hello", "hey",
+        "mybookings", "pending", "help", "hi", "hello", "hey", "status",
+        "confirm", "reject", "free?",
     }
 
     def _is_off_topic(self, text: str) -> bool:
