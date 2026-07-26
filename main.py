@@ -49,10 +49,12 @@ scheduler = AsyncIOScheduler()
 
 # ---- Long-lived singletons ----
 busy_mode = BusyModeManager(settings.busy_mode_db_path)
+ai_router = AIRouter(settings)
 telegram = TelegramMessenger(
     bot_token=settings.telegram_bot_token or "",
     owner_name=settings.owner_name,
     owner_telegram_id=settings.owner_telegram_id,
+    ai_router=ai_router,
 )
 notifications_mgr = NotificationManager(settings.notifications_db_path, telegram=telegram)
 appointment_mgr = AppointmentManager(settings.appointments_db_path)
@@ -60,7 +62,6 @@ telegram._notify_mgr = notifications_mgr
 telegram._busy_mgr = busy_mode
 telegram._appointment_mgr = appointment_mgr
 
-ai_router = AIRouter(settings)
 timetable = TimetableManager(settings.schedule_db_path, ai_router=ai_router)
 notifications_mgr.schedule = timetable
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -17,6 +18,7 @@ from telegram.ext import (
 )
 
 from core.busy_mode import MessengerAdapter
+from core.router.router import AIRouter, TaskType
 
 logger = logging.getLogger("emma.notifications.telegram")
 
@@ -70,6 +72,11 @@ class TelegramMessenger(MessengerAdapter):
 
     name = "telegram"
 
+    # Per-user rate limit: max AI calls per sliding window
+    _AI_CALL_LIMIT = 30
+    _AI_WINDOW_SEC = 3600  # 1 hour
+    _MAX_MESSAGE_LEN = 500
+
     def __init__(
         self,
         bot_token: str,
@@ -77,6 +84,7 @@ class TelegramMessenger(MessengerAdapter):
         owner_telegram_id: Optional[int] = None,
         notify_manager=None,
         busy_manager=None,
+        ai_router: Optional[AIRouter] = None,
     ):
         self.bot_token = bot_token
         self._owner_name = owner_name
@@ -84,12 +92,14 @@ class TelegramMessenger(MessengerAdapter):
         self._notify_mgr = notify_manager
         self._busy_mgr = busy_manager
         self._appointment_mgr = None
+        self._ai_router = ai_router
         self._app: Optional[Application] = None
         self._started = False
         self._stop_event: Optional[asyncio.Event] = None
         self._poll_task: Optional[asyncio.Task] = None
         self._last_error: Optional[str] = None
         self._message_log: list[dict] = []
+        self._ai_rate: dict[int, list[float]] = {}  # uid -> [timestamps]
 
     # ------------------------------------------------------------------
     # Owner detection
@@ -536,7 +546,71 @@ class TelegramMessenger(MessengerAdapter):
             chat_id = update.effective_chat.id
             self._register(uid, name, chat_id)
             self._log("message", uid, name, text)
-            await self._reply_status(update, uid, name, text)
+
+            if len(text) > self._MAX_MESSAGE_LEN:
+                await update.message.reply_text("Message too long. Please keep it under 500 characters.")
+                return
+
+            # If owner is busy and caller is not high-priority/owner:
+            # use the fast non-AI reply (no LLM cost)
+            state = self._busy_mgr.get_state() if self._busy_mgr else None
+            is_busy = bool(state and state.is_busy)
+            if is_busy and not self._is_owner(uid):
+                priority = self._notify_mgr.get_priority(uid) if self._notify_mgr else "normal"
+                if priority != "high":
+                    await self._reply_status(update, uid, name, text)
+                    return
+
+            # Guard off-topic messages before hitting the AI
+            if self._is_off_topic(text):
+                await update.message.reply_text(
+                    f"I can only help with {self._owner_name}'s schedule. "
+                    f"Send /help to see available commands."
+                )
+                return
+
+            # Rate limit check
+            if not self._check_rate_limit(uid):
+                await update.message.reply_text(
+                    "You've sent too many messages. Please wait a while and try again."
+                )
+                return
+
+            # If AI router isn't available, fall back to simple status reply
+            if not self._ai_router:
+                await self._reply_status(update, uid, name, text)
+                return
+
+            try:
+                ctx = self._build_ai_context(uid, name, text)
+                system = self._ai_system_prompt(ctx)
+                result = await self._ai_router.run(
+                    TaskType.CONVERSATION,
+                    text,
+                    system=system,
+                )
+                reply = result.text.strip()
+
+                # Parse and execute any [ACTION:] directive
+                action_match = re.search(r'\[ACTION:\s*(.*?)\]', reply)
+                if action_match:
+                    reply = re.sub(r'\s*\[ACTION:\s*.*?\]\s*', '', reply).strip()
+                    action_result = await self._execute_action(action_match.group(1).strip(), uid, name)
+                    if action_result:
+                        if reply:
+                            reply = reply + "\n\n" + action_result
+                        else:
+                            reply = action_result
+
+            except Exception as exc:
+                logger.warning("AI handler failed for %s (%d): %s", name, uid, exc)
+                await self._reply_status(update, uid, name, text)
+                return
+
+            if not reply:
+                reply = f"I can only help with {self._owner_name}'s schedule. Send /help to see available commands."
+
+            await update.message.reply_text(reply)
 
         # ---------- Callback query (inline keyboard) ----------
         async def _handle_callback(update: Update, context):
@@ -671,6 +745,219 @@ class TelegramMessenger(MessengerAdapter):
         except Exception as exc:
             logger.warning("free_hint failed: %s", exc)
             return None
+
+    # ------------------------------------------------------------------
+    # Rate limiting for AI calls
+    # ------------------------------------------------------------------
+    def _check_rate_limit(self, uid: int) -> bool:
+        now = time.time()
+        window = self._AI_WINDOW_SEC
+        limit = self._AI_CALL_LIMIT
+        timestamps = self._ai_rate.get(uid, [])
+        timestamps = [t for t in timestamps if now - t < window]
+        self._ai_rate[uid] = timestamps
+        if len(timestamps) >= limit:
+            return False
+        timestamps.append(now)
+        return True
+
+    # ------------------------------------------------------------------
+    # AI system prompt builder
+    # ------------------------------------------------------------------
+    def _build_ai_context(self, uid: int, name: str, text: str) -> dict:
+        owner = self._owner_name
+        state = self._busy_mgr.get_state() if self._busy_mgr else None
+        is_busy = bool(state and state.is_busy)
+        note = state.note if state and state.note else None
+
+        today = date.today().isoformat()
+        now_str = datetime.now().strftime("%H:%M")
+        return {
+            "owner_name": owner,
+            "is_owner": self._is_owner(uid),
+            "caller_name": name,
+            "caller_uid": uid,
+            "is_busy": is_busy,
+            "busy_note": note,
+            "today": today,
+            "now": now_str,
+            "message": text,
+            "owner_telegram_id": self._owner_telegram_id,
+        }
+
+    def _ai_system_prompt(self, ctx: dict) -> str:
+        busy_str = "busy" if ctx["is_busy"] else "free"
+        note_str = f" ({ctx['busy_note']})" if ctx["busy_note"] else ""
+        return (
+            f"You are Emma, a scheduling assistant for {ctx['owner_name']}. "
+            f"You ONLY handle the following topics:\n"
+            f"1. Checking if {ctx['owner_name']} is busy or free\n"
+            f"2. Booking appointments with {ctx['owner_name']}\n"
+            f"3. Listing available time slots\n"
+            f"4. Viewing or canceling the caller's own bookings\n"
+            f"5. Pending requests (owner only)\n\n"
+            f"Current context:\n"
+            f"- {ctx['owner_name']} is currently: {busy_str}{note_str}\n"
+            f"- Today's date: {ctx['today']}\n"
+            f"- Current time: {ctx['now']}\n"
+            f"- Caller name: {ctx['caller_name']}\n"
+            f"- Owner Telegram ID: {ctx.get('owner_telegram_id', 'not set')}\n\n"
+            f"Available actions (include ONE at the end of your response when needed):\n"
+            f"[ACTION: status] — check if owner is busy\n"
+            f"[ACTION: slots today|tomorrow|YYYY-MM-DD] — list free slots\n"
+            f"[ACTION: book DURATION DAY TIME] — book (e.g. book 1h 2026-07-27 14:00)\n"
+            f"[ACTION: mybookings] — list the caller's bookings\n"
+            f"[ACTION: cancel ID] — cancel a booking by its ID number\n\n"
+            f"STRICT RULES:\n"
+            f"- NEVER engage in general conversation, chit-chat, jokes, or non-schedule topics.\n"
+            f"- If the message is off-topic, reply: \"I can only help with {ctx['owner_name']}'s schedule. Send /help to see available commands.\"\n"
+            f"- Keep responses under 3 sentences, friendly but professional.\n"
+            f"- Only include [ACTION:] if the user clearly wants to DO something.\n"
+            f"- For greetings like \"hi\", \"hello\", respond briefly and invite them to ask about the schedule.\n"
+            f"- If you don't understand, tell them to use /help.\n"
+            f"- NEVER make up information about availability or bookings — only use what's given here."
+        )
+
+    # ------------------------------------------------------------------
+    # Parse and execute [ACTION:] directives from AI response
+    # ------------------------------------------------------------------
+    async def _execute_action(self, action: str, uid: int, name: str) -> Optional[str]:
+        m = re.match(r"(\w+)\s*(.*)", action)
+        if not m:
+            return None
+        cmd, args = m.group(1).lower(), m.group(2).strip()
+
+        if cmd == "status":
+            state = self._busy_mgr.get_state() if self._busy_mgr else None
+            if state and state.is_busy:
+                note = f" ({state.note})" if state.note else ""
+                return f"\U0001f6ab {self._owner_name} is currently busy{note}."
+            return f"\u2705 {self._owner_name} is currently free."
+
+        if cmd == "slots":
+            if not self._appointment_mgr:
+                return None
+            sched = getattr(self._notify_mgr, "schedule", None)
+            if not sched:
+                return None
+            target = date.today()
+            if args in ("tomorrow",):
+                target = date.today() + timedelta(days=1)
+            elif args:
+                try:
+                    target = date.fromisoformat(args)
+                except ValueError:
+                    pass
+            blocks = sched.list_day(target)
+            free_slots = self._appointment_mgr.find_free_slots(target, blocks, 30)
+            if not free_slots:
+                return f"No free slots on {target.isoformat()}."
+            lines = [f"Free slots for {target.isoformat()}:"]
+            for s in free_slots[:10]:
+                st = datetime.fromisoformat(s["start"])
+                en = datetime.fromisoformat(s["end"])
+                lines.append(f"  {_fmt_time(st)} \u2013 {_fmt_time(en)} ({s['duration_minutes']}min)")
+            if len(free_slots) > 10:
+                lines.append(f"  ... and {len(free_slots) - 10} more")
+            return "\n".join(lines)
+
+        if cmd == "book":
+            if not self._appointment_mgr:
+                return "Appointment system not available."
+            sched = getattr(self._notify_mgr, "schedule", None)
+            if not sched:
+                return "Schedule system not available."
+            parts = args.split()
+            if len(parts) < 3:
+                return None
+            dur_str, day_str, time_str = parts[0], parts[1], parts[2]
+            try:
+                target_day = date.fromisoformat(day_str)
+            except ValueError:
+                return None
+            dur_match = re.match(r"(\d+)h", dur_str)
+            duration_minutes = int(dur_match.group(1)) * 60 if dur_match else 60
+            dur_match_min = re.search(r"(\d+)min", dur_str)
+            if dur_match_min:
+                duration_minutes = int(dur_match_min.group(1))
+            try:
+                start_h, start_m = map(int, time_str.split(":"))
+            except ValueError:
+                return None
+            start_dt = datetime(target_day.year, target_day.month, target_day.day, start_h, start_m)
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+            # Check that the slot is actually free
+            blocks = sched.list_day(target_day)
+            free_slots = self._appointment_mgr.find_free_slots(target_day, blocks, duration_minutes)
+            slot_free = any(
+                datetime.fromisoformat(s["start"]) == start_dt
+                for s in free_slots
+            )
+            if not slot_free:
+                return f"Sorry, that slot isn't available on {target_day.isoformat()}. Try /myslots {target_day.isoformat()} to see free times."
+            self._appointment_mgr.create(
+                person_label=name,
+                person_telegram_id=uid,
+                day=target_day,
+                start=_fmt_time(start_dt),
+                end=_fmt_time(end_dt),
+                title=f"Appointment with {name}",
+                note=f"AI-booking: {dur_str} at {time_str}",
+            )
+            from_str = _fmt_time(start_dt)
+            to_str = _fmt_time(end_dt)
+            if self._notify_mgr:
+                await self._notify_mgr.notify_owner(
+                    f"\U0001f4c5 AI booking from {name}: {dur_str} on {target_day.isoformat()} at {time_str}"
+                )
+            return f"\u2705 Booked you {from_str}\u2013{to_str} on {target_day.isoformat()}. I'll notify {self._owner_name}."
+
+        if cmd == "mybookings":
+            if not self._appointment_mgr:
+                return "Appointment system not available."
+            all_appts = self._appointment_mgr.list()
+            mine = [a for a in all_appts if a.get("person_telegram_id") == uid
+                    and a["status"] != "rejected"]
+            if not mine:
+                return "You have no upcoming bookings."
+            lines = ["\U0001f4cb Your bookings:"]
+            for a in mine:
+                lines.append(f"  #{a['id']} {a['day']} {a['start']}\u2013{a['end']} [\u2705 {a['status']}]")
+            return "\n".join(lines)
+
+        if cmd == "cancel":
+            if not self._appointment_mgr:
+                return "Appointment system not available."
+            try:
+                appt_id = int(args)
+            except ValueError:
+                return None
+            appt = self._appointment_mgr.get(appt_id)
+            if not appt:
+                return f"Booking #{appt_id} not found."
+            if appt.get("person_telegram_id") != uid and not self._is_owner(uid):
+                return "That's not your booking."
+            self._appointment_mgr.delete(appt_id)
+            if self._notify_mgr:
+                await self._notify_mgr.notify_owner(
+                    f"\u274c {name} cancelled booking #{appt_id} via AI"
+                )
+            return f"\u274c Booking #{appt_id} cancelled."
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Off-topic guard
+    # ------------------------------------------------------------------
+    _SCHEDULE_KEYWORDS = {
+        "free", "busy", "book", "slot", "schedule", "appointment", "available",
+        "cancel", "booking", "meeting", "time", "when", "today", "tomorrow",
+        "mybookings", "pending", "help", "hi", "hello", "hey",
+    }
+
+    def _is_off_topic(self, text: str) -> bool:
+        words = set(re.sub(r"[^a-z0-9\s]", "", text.lower()).split())
+        return not bool(words & self._SCHEDULE_KEYWORDS)
 
     def _log(self, msg_type: str, uid: int, name: str, text: str):
         self._message_log.append({
