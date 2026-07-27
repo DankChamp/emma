@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import get_ai_router, get_busy_mode_manager, get_memory_manager, get_task_manager, get_timetable_manager, get_aqua_manager
+from api.deps import get_ai_router, get_busy_mode_manager, get_memory_manager, get_task_manager, get_timetable_manager, get_aqua_manager, get_luna_manager
 from core.busy_mode import BusyModeManager
 from core.memory import MemoryManager
 from core.router import AIRouter, TaskType
@@ -111,6 +111,27 @@ async def chat(
             else:
                 aqua_lines.append("Aqua is configured but not running. You can ask to launch her.")
             parts.append("\n".join(aqua_lines))
+        except Exception:
+            pass
+
+    # Luna context — tell Emma about her coding subordinate
+    try:
+        luna_mgr = get_luna_manager()
+    except ImportError:
+        luna_mgr = None
+    if luna_mgr:
+        try:
+            h = await luna_mgr.health()
+            luna_lines = ["\nYou have a subordinate AI called Luna specialized in coding and programming."]
+            if h.get("alive"):
+                luna_lines.append(f"Luna is online at {h.get('url', '?')} (uptime: {h.get('uptime', '?')}s).")
+                luna_lines.append("You can delegate coding, debugging, and programming tasks to her.")
+            else:
+                luna_lines.append("Luna is configured but not running. You can ask to launch her.")
+            luna_coding = memory.get_project_text("luna-coding")
+            if luna_coding:
+                luna_lines.append(f"\nRecent from Luna's coding sessions:\n{luna_coding[:500]}")
+            parts.append("\n".join(luna_lines))
         except Exception:
             pass
 

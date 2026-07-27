@@ -94,3 +94,11 @@ def get_aqua_manager():
         return aqua_mgr
     except ImportError:
         return None
+
+
+def get_luna_manager():
+    try:
+        from main import luna_mgr
+        return luna_mgr
+    except ImportError:
+        return None

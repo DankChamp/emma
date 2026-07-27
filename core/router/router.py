@@ -44,6 +44,7 @@ class AIRouter:
 
     def __init__(self, settings: Settings):
         from core.aqua.provider import AquaProvider
+        from core.luna.provider import LunaProvider
 
         self.settings = settings
 
@@ -54,6 +55,7 @@ class AIRouter:
         self._groq = GroqProvider(settings.groq_api_key, settings.groq_default_model)
         self._nim = NvidiaNIMProvider(settings.nvidia_nim_api_key, settings.nvidia_nim_default_model)
         self._aqua = AquaProvider(settings.aqua_api_url, settings.aqua_api_key, settings.aqua_default_model)
+        self._luna = LunaProvider(settings.luna_api_url, settings.luna_api_key, settings.luna_default_model)
 
         # Both "local" providers - Ollama and the generic OpenAI-compatible
         # one - are equally "local" for routing-preference purposes.
@@ -65,7 +67,7 @@ class AIRouter:
         self._routing_table: dict[TaskType, list[AIProvider]] = {
             TaskType.CONVERSATION: [self._ollama, self._local, self._groq],
             TaskType.GENERAL_ASSISTANT: [self._groq, self._ollama, self._local],
-            TaskType.CODING: [self._nim, self._groq, self._ollama, self._local],
+            TaskType.CODING: [self._luna, self._nim, self._groq, self._ollama, self._local],
             TaskType.REASONING: [self._nim, self._groq, self._ollama, self._local],
             TaskType.CREATIVE: [self._groq, self._ollama, self._local],
             TaskType.RESEARCH: [self._aqua, self._groq, self._ollama, self._local],
@@ -85,7 +87,7 @@ class AIRouter:
         # appended as a last resort. Without this, a task whose preferred
         # providers are all down (e.g. "conversation" prefers Ollama/Groq) would
         # fail even when another provider - NVIDIA NIM, say - is up and idle.
-        global_fallback = [self._ollama, self._local, self._groq, self._nim, self._aqua]
+        global_fallback = [self._ollama, self._local, self._groq, self._nim, self._aqua, self._luna]
         for task, providers in self._routing_table.items():
             for provider in global_fallback:
                 if provider not in providers:
@@ -100,6 +102,7 @@ class AIRouter:
             self._groq.name: self._groq,
             self._nim.name: self._nim,
             self._aqua.name: self._aqua,
+            self._luna.name: self._luna,
         }
 
     async def provider_status(self) -> list[dict]:
@@ -111,7 +114,7 @@ class AIRouter:
         """
         status = []
         for name, provider in self.providers_by_name.items():
-            if provider is self._local or provider is self._aqua:
+            if provider is self._local or provider is self._aqua or provider is self._luna:
                 configured = bool(getattr(provider, "api_url", None))
             else:
                 configured = bool(getattr(provider, "api_key", True))

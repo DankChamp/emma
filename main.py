@@ -21,9 +21,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks
+from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks, facts, ingest
 from api.routes import settings as settings_routes
 from api.routes import aqua as aqua_routes
+from api.routes import luna as luna_routes
 from config import get_settings
 from core.busy_mode import BusyModeManager
 from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
@@ -156,6 +157,89 @@ if aqua_mgr:
     reg.register(Tool("aqua_status", "Check Aqua's server status", [], _aqua_status))
 
 
+# ---- Luna lifecycle manager ----
+luna_mgr = None
+if settings.luna_project_dir:
+    from core.luna import LunaManager
+    luna_mgr = LunaManager(settings.luna_project_dir, settings.luna_api_url, settings.luna_api_key)
+
+# ---- Register Luna tools ----
+if luna_mgr:
+    from core.luna import LunaClient
+    from core.tools.registry import get_registry
+    from core.tools.registry import Tool
+
+    _luna_client = LunaClient(settings.luna_api_url, settings.luna_api_key)
+    reg = get_registry()
+
+    async def _luna_chat(**kw):
+        r = await _luna_client.chat(**kw)
+        return r or "no response"
+    reg.register(Tool("luna_ask", "Ask Luna (coding AI) to write, edit, or debug code", [
+        ("message", "The coding task to ask about", True),
+    ], _luna_chat))
+
+    async def _luna_status(**kw):
+        if luna_mgr:
+            h = await luna_mgr.health()
+            return f"Running: {h['running']} | Alive: {h['alive']} | PID: {h['pid']} | Uptime: {h['uptime']}s"
+        return "Luna manager not configured"
+    reg.register(Tool("luna_status", "Check Luna's server status", [], _luna_status))
+
+    async def _luna_launch(**kw):
+        if luna_mgr:
+            ok = await luna_mgr.launch()
+            return "Luna launched" if ok else "Failed to launch Luna"
+        return "Luna manager not configured"
+    reg.register(Tool("luna_launch", "Launch the Luna server if not running", [], _luna_launch))
+
+    async def _luna_stop(**kw):
+        if luna_mgr:
+            luna_mgr.stop()
+            return "Luna stopped"
+        return "Luna manager not configured"
+    reg.register(Tool("luna_stop", "Stop the Luna server", [], _luna_stop))
+
+# ---- Register share_fact tool (let Emma's AI push user data to subordinates) ----
+async def _share_fact(**kw):
+    from core.facts import FactRouter
+
+    fact = kw.get("fact", "")
+    if not fact:
+        return "No fact provided"
+    router = FactRouter(settings)
+    result = await router.push_fact(fact)
+    pushed = result.get("pushed_to", [])
+    if pushed:
+        return f"Shared fact with: {', '.join(pushed)}"
+    return "Fact noted but no subordinates were reachable to share with"
+reg.register(Tool("share_fact", "Share a fact about the user with subordinate AIs (Aqua, Luna)", [
+    ("fact", "The fact about the user to share", True),
+], _share_fact))
+
+# ---- Luna context pull tool ----
+async def _luna_pull_context(**kw):
+    from core.luna.client import LunaClient
+    from core.memory import MemoryManager
+    from config import DATA_DIR
+
+    client = LunaClient(settings.luna_api_url, settings.luna_api_key)
+    history = await client.get_history()
+    if not history:
+        return "Could not pull context from Luna (not reachable or no history)"
+    msgs = history.get("messages", [])
+    if not msgs:
+        return "Luna has no recent history to pull"
+    lines = [f"{m['role']}: {m['content']}" for m in msgs]
+    context = "Luna's recent coding sessions:\n" + "\n".join(lines)
+    memory = MemoryManager(settings.memory_db_path)
+    existing = memory.get_project_text("luna-coding")
+    updated = (existing + "\n---\n" + context) if existing else context
+    memory.set_project_text("luna-coding", updated)
+    return f"Pulled {len(msgs)} messages from Luna into project memory 'luna-coding'"
+reg.register(Tool("luna_pull_context", "Pull Luna's recent coding session context into Emma's memory", [], _luna_pull_context))
+
+
 async def _reminder_sweep() -> None:
     try:
         await reminders_mgr.check_due()
@@ -247,6 +331,15 @@ async def lifespan(app: FastAPI):
                 logger.info("Aqua auto-launched")
         except Exception as exc:
             logger.warning("Aqua auto-launch failed: %s", exc)
+
+    # Auto-launch Luna if configured
+    if settings.luna_auto_launch and luna_mgr:
+        try:
+            ok = await luna_mgr.launch()
+            if ok:
+                logger.info("Luna auto-launched")
+        except Exception as exc:
+            logger.warning("Luna auto-launch failed: %s", exc)
     scheduler.add_job(_reminder_sweep, "interval", seconds=30, id="reminder-sweep",
                       replace_existing=True)
     scheduler.add_job(_schedule_block_sweep, "interval", minutes=5, id="schedule-block-sweep",
@@ -284,6 +377,9 @@ app.include_router(settings_routes.router)
 app.include_router(selfcare.router)
 app.include_router(notifications.router)
 app.include_router(aqua_routes.router)
+app.include_router(luna_routes.router)
+app.include_router(facts.router)
+app.include_router(ingest.router)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 if WEB_DIR.is_dir():
@@ -306,6 +402,15 @@ async def health():
         except Exception:
             aqua_status["running"] = False
             aqua_status["alive"] = False
+    luna_status = {"configured": luna_mgr is not None}
+    if luna_mgr:
+        try:
+            h = await luna_mgr.health()
+            luna_status["running"] = h["running"]
+            luna_status["alive"] = h["alive"]
+        except Exception:
+            luna_status["running"] = False
+            luna_status["alive"] = False
     return {
         "ok": True,
         "auth_required": bool(settings.web_password),
@@ -315,6 +420,7 @@ async def health():
             "error": telegram.error,
         },
         "aqua": aqua_status,
+        "luna": luna_status,
     }
 
 

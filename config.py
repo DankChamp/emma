@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     aqua_auto_launch: bool = False
     aqua_default_model: str = ""
 
+    # --- Luna (subordinate coding AI) ---
+    luna_api_url: str = "http://127.0.0.1:8701"
+    luna_api_key: str = ""
+    luna_project_dir: str = ""
+    luna_auto_launch: bool = False
+    luna_default_model: str = ""
+
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
     owner_name: str = "VOID"
