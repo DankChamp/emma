@@ -17,6 +17,8 @@ from telegram.ext import (
     filters,
 )
 
+from telegram.error import Conflict as TelegramConflict
+
 from core.busy_mode import MessengerAdapter
 from core.router.router import AIRouter, TaskType
 
@@ -1048,8 +1050,15 @@ class TelegramMessenger(MessengerAdapter):
 
         for attempt, delay in enumerate(_RETRY_DELAYS):
             try:
-                await self._app.updater.start_polling()
+                await self._app.updater.start_polling(
+                    drop_pending_updates=True,
+                    bootstrap_retries=3,
+                )
                 break
+            except TelegramConflict:
+                logger.warning("Telegram Conflict (attempt %d) \u2014 closing stale session...", attempt + 1)
+                await self._close_stale_session()
+                await asyncio.sleep(delay)
             except Exception as exc:
                 self._last_error = str(exc)
                 logger.warning(
@@ -1076,9 +1085,16 @@ class TelegramMessenger(MessengerAdapter):
                 await self._close_stale_session()
                 for attempt, delay in enumerate(_RETRY_DELAYS):
                     try:
-                        await self._app.updater.start_polling()
+                        await self._app.updater.start_polling(
+                            drop_pending_updates=True,
+                            bootstrap_retries=3,
+                        )
                         self._last_error = None
                         break
+                    except TelegramConflict:
+                        logger.warning("Restart conflict \u2014 closing stale session...")
+                        await self._close_stale_session()
+                        await asyncio.sleep(delay)
                     except Exception as exc:
                         self._last_error = str(exc)
                         logger.warning("Restart attempt %d failed: %s", attempt + 1, exc)
