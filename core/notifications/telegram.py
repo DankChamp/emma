@@ -859,7 +859,9 @@ class TelegramMessenger(MessengerAdapter):
     async def _action_slots(self, args: str) -> Optional[str]:
         if not self._appointment_mgr:
             return None
-        sched = getattr(self._notify_mgr, "schedule", None)
+        if not self._notify_mgr:
+            return None
+        sched = self._notify_mgr.schedule
         if not sched:
             return None
         target = date.today()
@@ -887,7 +889,9 @@ class TelegramMessenger(MessengerAdapter):
     async def _action_book(self, args: str, uid: int, name: str) -> Optional[str]:
         if not self._appointment_mgr:
             return "Appointment system not available."
-        sched = getattr(self._notify_mgr, "schedule", None)
+        if not self._notify_mgr:
+            return "Schedule system not available."
+        sched = self._notify_mgr.schedule
         if not sched:
             return "Schedule system not available."
 
@@ -994,7 +998,7 @@ class TelegramMessenger(MessengerAdapter):
         "free", "busy", "book", "slot", "schedule", "appointment", "available",
         "cancel", "booking", "meeting", "time", "when", "today", "tomorrow",
         "mybookings", "pending", "help", "hi", "hello", "hey", "status",
-        "confirm", "reject", "free?",
+        "confirm", "reject",
     }
 
     def _is_off_topic(self, text: str) -> bool:
