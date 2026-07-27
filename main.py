@@ -32,6 +32,7 @@ from core.reminders import ReminderManager
 from core.persistence import hf_backup
 from core.router import AIRouter
 from core.schedule import TimetableManager
+from core.tools.registry import get_registry, Tool
 
 logger = logging.getLogger("emma.main")
 
@@ -73,6 +74,9 @@ reminders_mgr = ReminderManager(
     settings.reminders_db_path, notifications=notifications_mgr, busy_mode=busy_mode
 )
 
+# ---- Tool registry (used by Aqua, Luna, and standalone tools) ----
+reg = get_registry()
+
 # ---- Aqua lifecycle manager ----
 aqua_mgr = None
 if settings.aqua_project_dir:
@@ -82,11 +86,8 @@ if settings.aqua_project_dir:
 # ---- Register Aqua tools ----
 if aqua_mgr:
     from core.aqua import AquaClient
-    from core.tools.registry import get_registry
-    from core.tools.registry import Tool
 
     _aqua_client = AquaClient(settings.aqua_api_url, settings.aqua_api_key)
-    reg = get_registry()
 
     async def _aqua_chat(**kw):
         r = await _aqua_client.chat(**kw)
@@ -166,11 +167,8 @@ if settings.luna_project_dir:
 # ---- Register Luna tools ----
 if luna_mgr:
     from core.luna import LunaClient
-    from core.tools.registry import get_registry
-    from core.tools.registry import Tool
 
     _luna_client = LunaClient(settings.luna_api_url, settings.luna_api_key)
-    reg = get_registry()
 
     async def _luna_chat(**kw):
         r = await _luna_client.chat(**kw)
