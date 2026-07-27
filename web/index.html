@@ -128,8 +128,14 @@ td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .badge-ok { border-color: var(--ok); color: var(--ok); }
 .badge-warn { border-color: var(--warn); color: var(--warn); }
 .badge-err { border-color: var(--err); color: var(--err); }
+.status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.status-dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.status-dot.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.status-dot.err { background: var(--err); box-shadow: 0 0 6px var(--err); }
+.flex { display: flex; gap: 8px; }
 
 pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+#aqua-ask-result { margin-top: 8px; padding: 8px; background: var(--bg-input); border: 1px solid var(--border); min-height: 40px; }
 
 .section-title { font-size: 11px; font-weight: 600; color: var(--pink); letter-spacing: 2px; text-transform: uppercase; padding: 4px 2px; margin-bottom: 8px; text-shadow: 0 0 5px rgba(255,0,170,0.2); }
 
@@ -176,6 +182,7 @@ body.is-local .local-only { display: revert !important; }
     <li data-page="memory">Memory</li>
     <li data-page="schedule">Schedule</li>
     <li data-page="notifications-busy">Notifications &amp; Busy Mode</li>
+    <li data-page="aqua">Aqua</li>
     <li data-page="selfcare">Self-Care</li>
   </ul>
 </div>
@@ -441,6 +448,35 @@ body.is-local .local-only { display: revert !important; }
     <div class="row mt-8">
       <button id="nb-save" class="primary">Save Changes</button>
       <button id="nb-refresh">Refresh</button>
+    </div>
+  </div>
+
+  <!-- ===== AQUA ===== -->
+  <div class="page" id="page-aqua">
+    <div class="page-title">Aqua</div>
+    <div class="card" id="aqua-card">
+      <div style="margin-bottom:12px">
+        <span id="aqua-status-dot" class="status-dot warn"></span>
+        <span id="aqua-status-text">Checking...</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">
+        <span id="aqua-pid"></span><br>
+        <span id="aqua-uptime"></span><br>
+        <span id="aqua-url"></span>
+      </div>
+      <div class="flex">
+        <button id="aqua-launch" class="primary">Launch</button>
+        <button id="aqua-stop" class="danger">Stop</button>
+        <button id="aqua-refresh">Refresh</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="page-title" style="font-size:12px;margin-bottom:8px">Ask Aqua</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="aqua-ask-input" placeholder="Ask Aqua a research question..." style="flex:1">
+        <button id="aqua-ask-btn" class="primary">Ask</button>
+      </div>
+      <div id="aqua-ask-result" style="font-size:12px;white-space:pre-wrap"></div>
     </div>
   </div>
 
@@ -1550,6 +1586,78 @@ document.getElementById('selfcare-refresh-version').addEventListener('click', ()
 loadVersion();
 loadChangelog();
 
+// ==================== AQUA MANAGEMENT ====================
+async function loadAquaStatus() {
+  const dot = document.getElementById('aqua-status-dot');
+  const text = document.getElementById('aqua-status-text');
+  const pid = document.getElementById('aqua-pid');
+  const uptime = document.getElementById('aqua-uptime');
+  const url = document.getElementById('aqua-url');
+  try {
+    const data = await api('GET', '/aqua/status');
+    if (data.alive) {
+      dot.className = 'status-dot ok';
+      text.textContent = `Online · PID ${data.pid || '?'}`;
+      text.style.color = 'var(--accent)';
+    } else if (data.configured === false) {
+      dot.className = 'status-dot warn';
+      text.textContent = 'Not configured';
+      text.style.color = 'var(--text-dim)';
+    } else if (data.running) {
+      dot.className = 'status-dot warn';
+      text.textContent = 'Starting...';
+      text.style.color = 'var(--warn)';
+    } else {
+      dot.className = 'status-dot err';
+      text.textContent = 'Offline';
+      text.style.color = 'var(--err)';
+    }
+    if (data.pid) pid.textContent = `PID: ${data.pid}`;
+    else pid.textContent = '';
+    if (data.uptime) uptime.textContent = `Uptime: ${data.uptime}s`;
+    else uptime.textContent = '';
+    if (data.url) url.textContent = `URL: ${data.url}`;
+    else url.textContent = '';
+  } catch (e) {
+    dot.className = 'status-dot err';
+    text.textContent = 'Error checking status';
+  }
+}
+
+document.getElementById('aqua-launch')?.addEventListener('click', async () => {
+  try {
+    await api('POST', '/aqua/launch');
+    loadAquaStatus();
+  } catch (e) { alert('Failed to launch Aqua'); }
+});
+
+document.getElementById('aqua-stop')?.addEventListener('click', async () => {
+  try {
+    await api('POST', '/aqua/stop');
+    loadAquaStatus();
+  } catch (e) { alert('Failed to stop Aqua'); }
+});
+
+document.getElementById('aqua-refresh')?.addEventListener('click', loadAquaStatus);
+
+document.getElementById('aqua-ask-btn')?.addEventListener('click', async () => {
+  const input = document.getElementById('aqua-ask-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  const result = document.getElementById('aqua-ask-result');
+  result.textContent = 'Asking Aqua...';
+  try {
+    const data = await api('POST', '/aqua/ask', { message: msg, task_type: 'research' });
+    result.textContent = data.reply || '(no response)';
+  } catch (e) {
+    result.textContent = `Error: ${e.message}`;
+  }
+});
+
+document.getElementById('aqua-ask-input')?.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('aqua-ask-btn').click();
+});
+
 // ==================== REFRESH DATA ON TAB SWITCH ====================
 document.querySelectorAll('.nav li').forEach(li => {
   li.addEventListener('click', () => {
@@ -1560,6 +1668,7 @@ document.querySelectorAll('.nav li').forEach(li => {
     if (page === 'memory') { loadMemLongterm(); loadMemDaily(); loadProjectList(); loadMemOverview(); }
     if (page === 'schedule') loadSchedule();
     if (page === 'notifications-busy') { loadNotificationsBusy(); }
+    if (page === 'aqua') { loadAquaStatus(); }
     if (page === 'selfcare') { loadVersion(); loadChangelog(); }
   });
 });

@@ -86,3 +86,11 @@ def get_appointment_manager(settings: Settings = Depends(get_settings)) -> Appoi
 def get_update_manager(settings: Settings = Depends(get_settings)) -> UpdateManager:
     from config import BASE_DIR
     return UpdateManager(BASE_DIR)
+
+
+def get_aqua_manager():
+    try:
+        from main import aqua_mgr
+        return aqua_mgr
+    except ImportError:
+        return None

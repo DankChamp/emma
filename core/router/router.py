@@ -25,14 +25,14 @@ from .providers import (
     LocalGenericProvider,
     NvidiaNIMProvider,
 )
-
-
 class TaskType(str, Enum):
     CONVERSATION = "conversation"      # quick chit-chat, small talk
     CODING = "coding"                  # writing/debugging code
     REASONING = "reasoning"            # long, multi-step reasoning
     CREATIVE = "creative"              # creative writing
     GENERAL_ASSISTANT = "general"      # fast general tasks, summaries, routing decisions
+    RESEARCH = "research"              # research papers, document analysis
+    STUDY = "study"                    # flashcards, quizzes, study aids
 
 
 class AIRouter:
@@ -43,6 +43,8 @@ class AIRouter:
     """
 
     def __init__(self, settings: Settings):
+        from core.aqua.provider import AquaProvider
+
         self.settings = settings
 
         self._ollama = OllamaProvider(settings.ollama_base_url, settings.ollama_default_model)
@@ -51,6 +53,7 @@ class AIRouter:
         )
         self._groq = GroqProvider(settings.groq_api_key, settings.groq_default_model)
         self._nim = NvidiaNIMProvider(settings.nvidia_nim_api_key, settings.nvidia_nim_default_model)
+        self._aqua = AquaProvider(settings.aqua_api_url, settings.aqua_api_key, settings.aqua_default_model)
 
         # Both "local" providers - Ollama and the generic OpenAI-compatible
         # one - are equally "local" for routing-preference purposes.
@@ -65,6 +68,8 @@ class AIRouter:
             TaskType.CODING: [self._nim, self._groq, self._ollama, self._local],
             TaskType.REASONING: [self._nim, self._groq, self._ollama, self._local],
             TaskType.CREATIVE: [self._groq, self._ollama, self._local],
+            TaskType.RESEARCH: [self._aqua, self._groq, self._ollama, self._local],
+            TaskType.STUDY: [self._aqua, self._groq, self._ollama, self._local],
         }
 
         if settings.prefer_local_when_available:
@@ -80,7 +85,7 @@ class AIRouter:
         # appended as a last resort. Without this, a task whose preferred
         # providers are all down (e.g. "conversation" prefers Ollama/Groq) would
         # fail even when another provider - NVIDIA NIM, say - is up and idle.
-        global_fallback = [self._ollama, self._local, self._groq, self._nim]
+        global_fallback = [self._ollama, self._local, self._groq, self._nim, self._aqua]
         for task, providers in self._routing_table.items():
             for provider in global_fallback:
                 if provider not in providers:
@@ -94,6 +99,7 @@ class AIRouter:
             self._local.name: self._local,
             self._groq.name: self._groq,
             self._nim.name: self._nim,
+            self._aqua.name: self._aqua,
         }
 
     async def provider_status(self) -> list[dict]:
@@ -105,10 +111,8 @@ class AIRouter:
         """
         status = []
         for name, provider in self.providers_by_name.items():
-            if provider is self._local:
-                # No API key needed for most local servers - "configured"
-                # here means "has a base URL to talk to" instead.
-                configured = bool(getattr(provider, "base_url", None))
+            if provider is self._local or provider is self._aqua:
+                configured = bool(getattr(provider, "api_url", None))
             else:
                 configured = bool(getattr(provider, "api_key", True))
             available = await provider.is_available()
@@ -123,7 +127,7 @@ class AIRouter:
         return status
 
     def _candidates(self, task: TaskType) -> list[AIProvider]:
-        return self._routing_table.get(task, [self._ollama, self._groq, self._nim])
+        return self._routing_table.get(task, [self._ollama, self._groq, self._nim, self._aqua])
 
     async def run(
         self,

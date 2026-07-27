@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.deps import get_ai_router, get_busy_mode_manager, get_memory_manager, get_task_manager, get_timetable_manager
+from api.deps import get_ai_router, get_busy_mode_manager, get_memory_manager, get_task_manager, get_timetable_manager, get_aqua_manager
 from core.busy_mode import BusyModeManager
 from core.memory import MemoryManager
 from core.router import AIRouter, TaskType
@@ -89,6 +89,31 @@ async def chat(
     if task_summary:
         parts.append(f"The user's open tasks (from their task manager):\n{task_summary}")
 
+    # Aqua context — tell Emma about her subordinate
+    try:
+        aqua_mgr = get_aqua_manager()
+    except ImportError:
+        aqua_mgr = None
+    if aqua_mgr:
+        try:
+            h = await aqua_mgr.health()
+            aqua_lines = ["\nYou have a subordinate AI called Aqua specialized in research and study."]
+            if h.get("alive"):
+                aqua_lines.append(f"Aqua is online at {h.get('url', '?')} (uptime: {h.get('uptime', '?')}s).")
+                aqua_lines.append("You can delegate research, study, and document management to her.")
+                from core.tools.registry import get_registry
+                tools_block = get_registry().system_prompt_block()
+                if tools_block:
+                    aqua_lines.append("")
+                    aqua_lines.append(tools_block)
+                    aqua_lines.append("")
+                    aqua_lines.append("After executing a tool, I will report the result. Continue normally.")
+            else:
+                aqua_lines.append("Aqua is configured but not running. You can ask to launch her.")
+            parts.append("\n".join(aqua_lines))
+        except Exception:
+            pass
+
     system = "\n\n".join(parts) if parts else None
 
     try:
@@ -106,7 +131,23 @@ async def chat(
 
     memory.add_turn(payload.session_id, "assistant", result.text)
 
-    return ChatResponse(reply=result.text, provider=result.provider, model=result.model)
+    # Execute any [TOOL:...] directives from the response
+    from core.tools.executor import execute_directives
+    tool_results = await execute_directives(result.text)
+
+    # Append tool results to the reply so the user sees what happened
+    reply_text = result.text
+    if tool_results:
+        summaries = []
+        for tr in tool_results:
+            if tr["status"] == "ok":
+                summaries.append(f"[Aqua: {tr['tool']} — {tr.get('result', 'done')}]")
+            elif tr["status"] == "error":
+                summaries.append(f"[Aqua: {tr['tool']} failed — {tr.get('error', 'unknown error')}]")
+        if summaries:
+            reply_text = result.text + "\n\n" + "\n".join(summaries)
+
+    return ChatResponse(reply=reply_text, provider=result.provider, model=result.model)
 
 
 @router.get("/history/{session_id}")

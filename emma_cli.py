@@ -402,6 +402,37 @@ def cmd_contacts_remove(args):
     _print(_request("DELETE", f"/status/contacts/{args.name}"))
 
 
+# ── Aqua ──
+
+def cmd_aqua_status(args):
+    data = _request("GET", "/aqua/status")
+    if data.get("configured") is False:
+        print("Aqua is not configured (set AQUA_PROJECT_DIR in .env).")
+        return
+    print(f"Running: {data.get('running', False)}")
+    print(f"Alive:   {data.get('alive', False)}")
+    print(f"PID:     {data.get('pid', 'N/A')}")
+    uptime = data.get('uptime')
+    print(f"Uptime:  {uptime if uptime is not None else 'N/A'}s")
+    print(f"URL:     {data.get('url', 'N/A')}")
+
+
+def cmd_aqua_launch(args):
+    data = _request("POST", "/aqua/launch")
+    print(f"Aqua launched. Status: {data.get('status', {}).get('alive', False)}")
+
+
+def cmd_aqua_stop(args):
+    _print(_request("POST", "/aqua/stop"))
+    print("Aqua stopped.")
+
+
+def cmd_aqua_ask(args):
+    message = " ".join(args.message)
+    data = _request("POST", "/aqua/ask", json={"message": message, "task_type": "research"})
+    print(data.get("reply", "(no response)"))
+
+
 # ── Build Parser ──
 
 def build_parser() -> argparse.ArgumentParser:
@@ -417,7 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # chat
     p = sub.add_parser("chat", help="talk to Emma's AI router directly")
-    p.add_argument("message"); p.add_argument("--task-type", default="conversation", choices=["conversation", "coding", "reasoning", "creative", "general"]); p.set_defaults(func=cmd_chat)
+    p.add_argument("message"); p.add_argument("--task-type", default="conversation", choices=["conversation", "coding", "reasoning", "creative", "general", "research", "study"]); p.set_defaults(func=cmd_chat)
 
     # providers
     prov = sub.add_parser("providers", help="manage AI providers")
@@ -485,6 +516,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = cnt_sub.add_parser("list", help="list contacts"); p.set_defaults(func=cmd_contacts_list)
     p = cnt_sub.add_parser("add", help="add a contact"); p.add_argument("name"); p.add_argument("message"); p.set_defaults(func=cmd_contacts_add)
     p = cnt_sub.add_parser("remove", help="remove a contact"); p.add_argument("name"); p.set_defaults(func=cmd_contacts_remove)
+
+    # aqua
+    aq = sub.add_parser("aqua", help="manage Aqua (subordinate research AI)")
+    aq_sub = aq.add_subparsers(dest="aqua_command", required=True)
+    p = aq_sub.add_parser("status", help="check Aqua status"); p.set_defaults(func=cmd_aqua_status)
+    p = aq_sub.add_parser("launch", help="start the Aqua server"); p.set_defaults(func=cmd_aqua_launch)
+    p = aq_sub.add_parser("stop", help="stop the Aqua server"); p.set_defaults(func=cmd_aqua_stop)
+    p = aq_sub.add_parser("ask", help="ask Aqua a question")
+    p.add_argument("message", nargs="+"); p.set_defaults(func=cmd_aqua_ask)
 
     return parser
 

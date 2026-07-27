@@ -107,6 +107,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WEB_PASSWORD", "EMMA_WEB_PASSWORD"),
     )
 
+    # --- Aqua (subordinate research/study AI) ---
+    aqua_api_url: str = "http://127.0.0.1:8765"
+    aqua_api_key: str = ""
+    aqua_project_dir: str = ""
+    aqua_auto_launch: bool = False
+    aqua_default_model: str = ""
+
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
     owner_name: str = "VOID"

@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks
 from api.routes import settings as settings_routes
+from api.routes import aqua as aqua_routes
 from config import get_settings
 from core.busy_mode import BusyModeManager
 from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
@@ -70,6 +71,89 @@ notifications_mgr.schedule = timetable
 reminders_mgr = ReminderManager(
     settings.reminders_db_path, notifications=notifications_mgr, busy_mode=busy_mode
 )
+
+# ---- Aqua lifecycle manager ----
+aqua_mgr = None
+if settings.aqua_project_dir:
+    from core.aqua import AquaManager
+    aqua_mgr = AquaManager(settings.aqua_project_dir, settings.aqua_api_url, settings.aqua_api_key)
+
+# ---- Register Aqua tools ----
+if aqua_mgr:
+    from core.aqua import AquaClient
+    from core.tools.registry import get_registry
+    from core.tools.registry import Tool
+
+    _aqua_client = AquaClient(settings.aqua_api_url, settings.aqua_api_key)
+    reg = get_registry()
+
+    async def _aqua_chat(**kw):
+        r = await _aqua_client.chat(**kw)
+        return r or "no response"
+    reg.register(Tool("aqua_ask", "Ask Aqua (research/study AI) a question", [
+        ("message", "The question to ask", True),
+        ("task_type", "Task type: research, study, conversation (default: research)", False),
+    ], _aqua_chat))
+
+    async def _aqua_create_doc(**kw):
+        r = await _aqua_client.create_document(**kw)
+        return f"Document created: {r.get('title', 'unknown')} (id={r.get('id', '?')})" if r else "failed"
+    reg.register(Tool("aqua_create_document", "Create a research document in Aqua", [
+        ("title", "Document title", True),
+        ("content", "Document content", True),
+        ("authors", "Author(s)", False),
+        ("source", "Source type (manual, pdf, url)", False),
+        ("tags", "Comma-separated tags as a list like [tag1, tag2]", False),
+    ], _aqua_create_doc))
+
+    async def _aqua_search(**kw):
+        results = await _aqua_client.search_documents(**kw)
+        if not results:
+            return "No results found"
+        parts = [f"{r.get('title', 'Untitled')}: {r.get('content', '')[:200]}" for r in results[:3]]
+        return "\n".join(parts)
+    reg.register(Tool("aqua_search", "Search Aqua's document knowledge base", [
+        ("query", "Search query", True),
+        ("limit", "Max results (default: 5)", False),
+    ], _aqua_search))
+
+    async def _aqua_create_note(**kw):
+        r = await _aqua_client.create_note(**kw)
+        return f"Note created: {r.get('title', 'untitled')} (id={r.get('id', '?')})" if r else "failed"
+    reg.register(Tool("aqua_create_note", "Create a research note in Aqua", [
+        ("content", "Note content", True),
+        ("title", "Note title", False),
+    ], _aqua_create_note))
+
+    async def _aqua_create_fc(**kw):
+        r = await _aqua_client.create_flashcard(**kw)
+        return f"Flashcard created: {r.get('question', '?')} (id={r.get('id', '?')})" if r else "failed"
+    reg.register(Tool("aqua_create_flashcard", "Create a flashcard in Aqua", [
+        ("question", "The question", True),
+        ("answer", "The answer", True),
+        ("topic", "Topic category", False),
+    ], _aqua_create_fc))
+
+    async def _aqua_launch(**kw):
+        if aqua_mgr:
+            ok = await aqua_mgr.launch()
+            return "Aqua launched" if ok else "Failed to launch Aqua"
+        return "Aqua manager not configured"
+    reg.register(Tool("aqua_launch", "Launch the Aqua server if not running", [], _aqua_launch))
+
+    async def _aqua_stop(**kw):
+        if aqua_mgr:
+            aqua_mgr.stop()
+            return "Aqua stopped"
+        return "Aqua manager not configured"
+    reg.register(Tool("aqua_stop", "Stop the Aqua server", [], _aqua_stop))
+
+    async def _aqua_status(**kw):
+        if aqua_mgr:
+            h = await aqua_mgr.health()
+            return f"Running: {h['running']} | Alive: {h['alive']} | PID: {h['pid']} | Uptime: {h['uptime']}s"
+        return "Aqua manager not configured"
+    reg.register(Tool("aqua_status", "Check Aqua's server status", [], _aqua_status))
 
 
 async def _reminder_sweep() -> None:
@@ -154,6 +238,15 @@ async def _schedule_block_sweep() -> None:
 async def lifespan(app: FastAPI):
     scheduler.start()
     await _schedule_block_sweep()
+
+    # Auto-launch Aqua if configured
+    if settings.aqua_auto_launch and aqua_mgr:
+        try:
+            ok = await aqua_mgr.launch()
+            if ok:
+                logger.info("Aqua auto-launched")
+        except Exception as exc:
+            logger.warning("Aqua auto-launch failed: %s", exc)
     scheduler.add_job(_reminder_sweep, "interval", seconds=30, id="reminder-sweep",
                       replace_existing=True)
     scheduler.add_job(_schedule_block_sweep, "interval", minutes=5, id="schedule-block-sweep",
@@ -190,6 +283,7 @@ app.include_router(status.router)
 app.include_router(settings_routes.router)
 app.include_router(selfcare.router)
 app.include_router(notifications.router)
+app.include_router(aqua_routes.router)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 if WEB_DIR.is_dir():
@@ -202,7 +296,16 @@ def root():
 
 
 @app.get("/health")
-def health():
+async def health():
+    aqua_status = {"configured": aqua_mgr is not None}
+    if aqua_mgr:
+        try:
+            h = await aqua_mgr.health()
+            aqua_status["running"] = h["running"]
+            aqua_status["alive"] = h["alive"]
+        except Exception:
+            aqua_status["running"] = False
+            aqua_status["alive"] = False
     return {
         "ok": True,
         "auth_required": bool(settings.web_password),
@@ -211,6 +314,7 @@ def health():
             "running": telegram.is_running,
             "error": telegram.error,
         },
+        "aqua": aqua_status,
     }
 
 
