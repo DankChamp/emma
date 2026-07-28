@@ -87,6 +87,8 @@ class TelegramMessenger(MessengerAdapter):
         notify_manager=None,
         busy_manager=None,
         ai_router: Optional[AIRouter] = None,
+        profile_mgr=None,
+        task_mgr=None,
     ):
         self.bot_token = bot_token
         self._owner_name = owner_name
@@ -95,6 +97,9 @@ class TelegramMessenger(MessengerAdapter):
         self._busy_mgr = busy_manager
         self._appointment_mgr = None
         self._ai_router = ai_router
+        self._profile_mgr = profile_mgr
+        self._task_mgr = task_mgr
+        self._timetable_mgr = None
         self._app: Optional[Application] = None
         self._started = False
         self._stop_event: Optional[asyncio.Event] = None
@@ -553,35 +558,38 @@ class TelegramMessenger(MessengerAdapter):
                 await update.message.reply_text("Message too long. Please keep it under 500 characters.")
                 return
 
+            is_owner = self._is_owner(uid)
+
             # If owner is busy and caller is not high-priority/owner:
             # use the fast non-AI reply (no LLM cost)
-            try:
-                state = self._busy_mgr.get_state() if self._busy_mgr else None
-            except Exception:
-                state = None
-            is_busy = bool(state and state.is_busy)
-            if is_busy and not self._is_owner(uid):
-                priority = "normal"
-                if self._notify_mgr:
-                    priority = self._notify_mgr.get_priority(uid) or "normal"
-                if priority != "high":
-                    await self._reply_status(update, uid, name, text)
+            if not is_owner:
+                try:
+                    state = self._busy_mgr.get_state() if self._busy_mgr else None
+                except Exception:
+                    state = None
+                is_busy = bool(state and state.is_busy)
+                if is_busy:
+                    priority = "normal"
+                    if self._notify_mgr:
+                        priority = self._notify_mgr.get_priority(uid) or "normal"
+                    if priority != "high":
+                        await self._reply_status(update, uid, name, text)
+                        return
+
+                # Guard off-topic messages before hitting the AI
+                if self._is_off_topic(text):
+                    await update.message.reply_text(
+                        f"I can only help with {self._owner_name}'s schedule. "
+                        f"Send /help to see available commands."
+                    )
                     return
 
-            # Guard off-topic messages before hitting the AI
-            if self._is_off_topic(text):
-                await update.message.reply_text(
-                    f"I can only help with {self._owner_name}'s schedule. "
-                    f"Send /help to see available commands."
-                )
-                return
-
-            # Rate limit check
-            if not self._check_rate_limit(uid):
-                await update.message.reply_text(
-                    "You've sent too many messages. Please wait an hour and try again."
-                )
-                return
+                # Rate limit check
+                if not self._check_rate_limit(uid):
+                    await update.message.reply_text(
+                        "You've sent too many messages. Please wait an hour and try again."
+                    )
+                    return
 
             # If AI router isn't available, fall back to simple status reply
             if not self._ai_router:
@@ -601,10 +609,18 @@ class TelegramMessenger(MessengerAdapter):
                 # Parse and execute any [ACTION:] directive
                 action_match = re.search(r'\[ACTION:\s*(.*?)\]', reply)
                 if action_match:
-                    reply = re.sub(r'\s*\[ACTION:\s*.*?\]\s*', '', reply).strip()
-                    action_result = await self._execute_action(action_match.group(1).strip(), uid, name)
+                    action_tag = action_match.group(1).strip()
+                    reply_clean = re.sub(r'\s*\[ACTION:\s*.*?\]\s*', '', reply).strip()
+                    action_result = await self._execute_action(
+                        action_tag, uid, name,
+                        reply_text=reply_clean,
+                    )
+                    reply = reply_clean
                     if action_result:
-                        if reply:
+                        # send_to replaces the reply (message was forwarded to recipient)
+                        if action_tag.lower().startswith("send_to"):
+                            reply = action_result
+                        elif reply:
                             reply = reply + "\n\n" + action_result
                         else:
                             reply = action_result
@@ -793,6 +809,42 @@ class TelegramMessenger(MessengerAdapter):
         }
 
     def _ai_system_prompt(self, ctx: dict) -> str:
+        if ctx["is_owner"]:
+            return self._owner_system_prompt(ctx)
+        return self._guest_system_prompt(ctx)
+
+    def _owner_system_prompt(self, ctx: dict) -> str:
+        busy_str = "busy" if ctx["is_busy"] else "free"
+        note_str = f" ({ctx['busy_note']})" if ctx["busy_note"] else ""
+        return (
+            f"You are Emma, VOID's personal AI assistant. "
+            f"VOID is your owner. Refer to him as VOID. Use male pronouns (he/him/his) for him.\n\n"
+            f"You help VOID manage his time, build daily schedules, organize his day, "
+            f"and communicate with his contacts. You can chat casually with him.\n\n"
+            f"You MUST obey VOID's commands. When he tells you to do something, do it.\n\n"
+            f"Context:\n"
+            f"- VOID: {busy_str}{note_str}\n"
+            f"- Today: {ctx['today']} {ctx['now']}\n\n"
+            f"Actions (put ONE at end of your response):\n"
+            f"[ACTION: status] — check busy/free status\n"
+            f"[ACTION: slots today|tomorrow|YYYY-MM-DD] — free slots\n"
+            f"[ACTION: book DURATION DAY TIME] — book appointment\n"
+            f"[ACTION: mybookings] — view your bookings\n"
+            f"[ACTION: cancel ID] — cancel a booking\n"
+            f"[ACTION: pending] — pending appointment requests\n"
+            f"[ACTION: build_schedule DAYS] — generate timetable for N days\n"
+            f"[ACTION: my_day] — show today's schedule\n"
+            f"[ACTION: my_appointments DAY] — view appointments for a day\n"
+            f"[ACTION: send_to NAME] — forward my response to a contact\n\n"
+            f"RULES:\n"
+            f"- Be concise but friendly. VOID is your owner, not a customer.\n"
+            f"- Use his name: VOID.\n"
+            f"- Only use [ACTION:] when VOID wants you to DO something.\n"
+            f"- For \"send_to\", the message content is your response text.\n"
+            f"- NEVER make up availability or booking info."
+        )
+
+    def _guest_system_prompt(self, ctx: dict) -> str:
         busy_str = "busy" if ctx["is_busy"] else "free"
         note_str = f" ({ctx['busy_note']})" if ctx["busy_note"] else ""
         return (
@@ -825,7 +877,9 @@ class TelegramMessenger(MessengerAdapter):
     # ------------------------------------------------------------------
     # Parse and execute [ACTION:] directives from AI response
     # ------------------------------------------------------------------
-    async def _execute_action(self, action: str, uid: int, name: str) -> Optional[str]:
+    async def _execute_action(
+        self, action: str, uid: int, name: str, reply_text: str = ""
+    ) -> Optional[str]:
         m = re.match(r"(\w+)\s*(.*)", action)
         if not m:
             return None
@@ -848,6 +902,18 @@ class TelegramMessenger(MessengerAdapter):
 
         if cmd == "pending":
             return await self._action_pending(uid)
+
+        if cmd == "build_schedule":
+            return await self._action_build_schedule(args)
+
+        if cmd == "my_day":
+            return await self._action_my_day()
+
+        if cmd == "my_appointments":
+            return self._action_my_appointments(args)
+
+        if cmd == "send_to":
+            return await self._action_send_to(args, reply_text)
 
         return None
 
@@ -991,6 +1057,122 @@ class TelegramMessenger(MessengerAdapter):
                 f"  {a['day']} {a['start']}\u2013{a['end']}"
                 f"  /confirm {a['id']}  /reject {a['id']}"
             )
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Owner-only actions
+    # ------------------------------------------------------------------
+    async def _action_build_schedule(self, args: str) -> Optional[str]:
+        if not self._timetable_mgr:
+            return "Schedule builder not available."
+        days = 3
+        if args.strip():
+            try:
+                days = max(1, min(14, int(args.strip().split()[0])))
+            except ValueError:
+                pass
+        profile_data = self._profile_mgr.get_all() if self._profile_mgr else None
+        pending_tasks = None
+        if self._task_mgr:
+            try:
+                pending_tasks = self._task_mgr.list(status="pending")
+            except Exception:
+                pass
+        try:
+            results = await self._timetable_mgr.build_multi_day(
+                text=f"Generate a {days}-day schedule.",
+                days=days,
+                profile=profile_data,
+                pending_tasks=pending_tasks,
+            )
+        except Exception as exc:
+            logger.warning("build_multi_day failed: %s", exc)
+            return "Sorry, I couldn't generate the schedule right now."
+        if not results:
+            return "No schedule generated."
+        lines = []
+        for day_str, blocks in results.items():
+            lines.append(f"\n\U0001f4c5 {day_str}")
+            if not blocks:
+                lines.append("  No blocks scheduled.")
+                continue
+            for b in blocks:
+                start = b.start.strftime("%H:%M")
+                end = b.end.strftime("%H:%M")
+                lines.append(f"  \U0001f534 {start}\u2013{end}  {b.title}")
+        return "\n".join(lines)
+
+    def _find_user_by_name(self, name: str) -> Optional[int]:
+        if not self._notify_mgr:
+            return None
+        users = self._notify_mgr.list_users()
+        name_lower = name.lower().strip()
+        # Exact case-insensitive match on label
+        for u in users:
+            if u.get("label", "").lower() == name_lower:
+                return u.get("chat_id")
+        # Exact case-insensitive match on name
+        for u in users:
+            if u.get("name", "").lower() == name_lower:
+                return u.get("chat_id")
+        # Partial match: name is prefix of label/name
+        for u in users:
+            if u.get("label", "").lower().startswith(name_lower):
+                return u.get("chat_id")
+        for u in users:
+            if u.get("name", "").lower().startswith(name_lower):
+                return u.get("chat_id")
+        return None
+
+    async def _action_send_to(self, args: str, message: str) -> Optional[str]:
+        if not args.strip():
+            return "Tell me who to send it to."
+        parts = args.strip().split(maxsplit=1)
+        recipient_name = parts[0]
+        chat_id = self._find_user_by_name(recipient_name)
+        if not chat_id:
+            known = []
+            if self._notify_mgr:
+                for u in self._notify_mgr.list_users():
+                    label = u.get("label") or u.get("name") or ""
+                    known.append(label)
+            names = ", ".join(known[:10]) if known else "none registered"
+            return f"Couldn't find \"{recipient_name}\". Known contacts: {names}"
+        ok = await self.send_to_chat(chat_id, message)
+        if ok:
+            return f"\u2705 Sent to {recipient_name}."
+        return f"Failed to send to {recipient_name}."
+
+    def _action_my_day(self) -> Optional[str]:
+        if not self._notify_mgr or not self._notify_mgr.schedule:
+            return "Schedule not available."
+        today = date.today()
+        blocks = self._notify_mgr.schedule.list_day(today)
+        if not blocks:
+            return f"No schedule blocks for {today.isoformat()}."
+        lines = [f"\U0001f4c5 Today's schedule ({today.isoformat()}):"]
+        for b in blocks:
+            lines.append(f"  \U0001f534 {b.start.strftime('%H:%M')}\u2013{b.end.strftime('%H:%M')}  {b.title}")
+        return "\n".join(lines)
+
+    def _action_my_appointments(self, args: str) -> Optional[str]:
+        if not self._appointment_mgr:
+            return "Appointment system not available."
+        target = date.today()
+        clean = args.strip().lower()
+        if clean in ("tomorrow",):
+            target = date.today() + timedelta(days=1)
+        elif clean:
+            try:
+                target = date.fromisoformat(clean)
+            except ValueError:
+                pass
+        appts = self._appointment_mgr.list(day=target)
+        if not appts:
+            return f"No appointments on {target.isoformat()}."
+        lines = [f"\U0001f4cb Appointments for {target.isoformat()}:"]
+        for a in appts:
+            lines.append(f"  #{a['id']} {a['start']}\u2013{a['end']}  {a.get('title', '')}  [{a['status']}]")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

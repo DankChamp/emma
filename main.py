@@ -28,7 +28,9 @@ from api.routes import luna as luna_routes
 from config import get_settings
 from core.busy_mode import BusyModeManager
 from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
+from core.profile.manager import ProfileManager
 from core.reminders import ReminderManager
+from core.tasks.manager import TaskManager
 from core.persistence import hf_backup
 from core.router import AIRouter
 from core.schedule import TimetableManager
@@ -53,11 +55,16 @@ scheduler = AsyncIOScheduler()
 # ---- Long-lived singletons ----
 busy_mode = BusyModeManager(settings.busy_mode_db_path)
 ai_router = AIRouter(settings)
+profile_mgr = ProfileManager(settings.profile_db_path)
+task_mgr = TaskManager(settings.tasks_db_path)
+
 telegram = TelegramMessenger(
     bot_token=settings.telegram_bot_token or "",
     owner_name=settings.owner_name,
     owner_telegram_id=settings.owner_telegram_id,
     ai_router=ai_router,
+    profile_mgr=profile_mgr,
+    task_mgr=task_mgr,
 )
 notifications_mgr = NotificationManager(settings.notifications_db_path, telegram=telegram)
 appointment_mgr = AppointmentManager(settings.appointments_db_path)
@@ -67,6 +74,7 @@ telegram._appointment_mgr = appointment_mgr
 
 timetable = TimetableManager(settings.schedule_db_path, ai_router=ai_router)
 notifications_mgr.schedule = timetable
+telegram._timetable_mgr = timetable
 
 # Reminders: one manager + one recurring sweep instead of per-reminder jobs,
 # so reminders created while Emma was off still fire after a restart.
