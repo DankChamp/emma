@@ -20,12 +20,15 @@ class LunaClient:
         except httpx.HTTPError:
             return False
 
-    async def chat(self, message: str) -> str | None:
+    async def chat(self, message: str, system: str = "") -> str | None:
         try:
+            payload = {"message": message}
+            if system:
+                payload["system"] = system
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
                     f"{self.api_url}/api/chat",
-                    json={"message": message},
+                    json=payload,
                     headers=self._headers(),
                 )
                 if resp.status_code == 200:
