@@ -835,12 +835,12 @@ class TelegramMessenger(MessengerAdapter):
             f"[ACTION: build_schedule DAYS] — generate timetable for N days\n"
             f"[ACTION: my_day] — show today's schedule\n"
             f"[ACTION: my_appointments DAY] — view appointments for a day\n"
-            f"[ACTION: send_to NAME] — forward my response to a contact\n\n"
+            f"[ACTION: send_to NAME] — send a message to a contact. Put the message in your response text, send_to carries only the name.\n\n"
             f"RULES:\n"
             f"- Be concise but friendly. VOID is your owner, not a customer.\n"
-            f"- Use his name: VOID.\n"
+            f"- Refer to him as VOID.\n"
             f"- Only use [ACTION:] when VOID wants you to DO something.\n"
-            f"- For \"send_to\", the message content is your response text.\n"
+            f"- For send_to, your response text IS the message that gets delivered.\n"
             f"- NEVER make up availability or booking info."
         )
 
@@ -904,7 +904,7 @@ class TelegramMessenger(MessengerAdapter):
             return await self._action_pending(uid)
 
         if cmd == "build_schedule":
-            return await self._action_build_schedule(args)
+            return await self._action_build_schedule(args, context=reply_text)
 
         if cmd == "my_day":
             return await self._action_my_day()
@@ -1062,7 +1062,7 @@ class TelegramMessenger(MessengerAdapter):
     # ------------------------------------------------------------------
     # Owner-only actions
     # ------------------------------------------------------------------
-    async def _action_build_schedule(self, args: str) -> Optional[str]:
+    async def _action_build_schedule(self, args: str, context: str = "") -> Optional[str]:
         if not self._timetable_mgr:
             return "Schedule builder not available."
         days = 3
@@ -1078,9 +1078,10 @@ class TelegramMessenger(MessengerAdapter):
                 pending_tasks = self._task_mgr.list(status="pending")
             except Exception:
                 pass
+        prompt = context or f"Generate a {days}-day schedule."
         try:
             results = await self._timetable_mgr.build_multi_day(
-                text=f"Generate a {days}-day schedule.",
+                text=prompt,
                 days=days,
                 profile=profile_data,
                 pending_tasks=pending_tasks,
@@ -1138,7 +1139,7 @@ class TelegramMessenger(MessengerAdapter):
                     known.append(label)
             names = ", ".join(known[:10]) if known else "none registered"
             return f"Couldn't find \"{recipient_name}\". Known contacts: {names}"
-        ok = await self.send_to_chat(chat_id, message)
+        ok = await self.send_to_chat(chat_id, f"\U0001f4e9 From {self._owner_name}:\n\n{message}")
         if ok:
             return f"\u2705 Sent to {recipient_name}."
         return f"Failed to send to {recipient_name}."
@@ -1149,10 +1150,11 @@ class TelegramMessenger(MessengerAdapter):
         today = date.today()
         blocks = self._notify_mgr.schedule.list_day(today)
         if not blocks:
-            return f"No schedule blocks for {today.isoformat()}."
-        lines = [f"\U0001f4c5 Today's schedule ({today.isoformat()}):"]
+            return f"No blocks scheduled for {today.strftime('%A, %b %d')}."
+        lines = [f"\U0001f4c5 Today — {today.strftime('%A, %b %d')}"]
         for b in blocks:
-            lines.append(f"  \U0001f534 {b.start.strftime('%H:%M')}\u2013{b.end.strftime('%H:%M')}  {b.title}")
+            icon = "\U0001f534" if b.busy else "\U0001f7e2"
+            lines.append(f"  {icon} {b.start.strftime('%H:%M')}\u2013{b.end.strftime('%H:%M')}  {b.title}")
         return "\n".join(lines)
 
     def _action_my_appointments(self, args: str) -> Optional[str]:
