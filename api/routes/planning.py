@@ -8,8 +8,6 @@ Both degrade gracefully: the structured data (tasks, schedule) is always
 returned even when no AI provider is reachable - the `summary` field is just
 empty then.
 """
-from datetime import date, datetime
-
 from fastapi import APIRouter, Depends
 
 from api.deps import get_ai_router, get_memory_manager, get_task_manager, get_timetable_manager
@@ -17,6 +15,7 @@ from core.memory import MemoryManager
 from core.router import AIRouter, TaskType
 from core.schedule import TimetableManager
 from core.tasks import TaskManager
+from core.timeutil import local_now, local_today
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 
@@ -24,7 +23,7 @@ router = APIRouter(prefix="/planning", tags=["planning"])
 def _schedule_lines(timetable: TimetableManager) -> list[str]:
     return [
         f"{b.start.strftime('%H:%M')}-{b.end.strftime('%H:%M')} {b.title}"
-        for b in timetable.list_day(date.today())
+        for b in timetable.list_day(local_today())
     ]
 
 
@@ -56,7 +55,7 @@ async def morning_brief(
             "Given their open tasks and today's schedule, write 3-5 sentences: greet them, "
             "estimate today's workload, and suggest which 1-3 tasks to hit first and why. "
             "Be warm but concise. No markdown headers.\n\n"
-            f"Date: {date.today().isoformat()}\n"
+            f"Date: {local_today().isoformat()}\n"
             f"Open tasks:\n{task_text}\n\n"
             f"Today's schedule:\n" + ("\n".join(schedule) or "(empty)") +
             (f"\n\nToday's note:\n{daily_note}" if daily_note else "")
@@ -64,7 +63,7 @@ async def morning_brief(
         summary = await _ai_summary(ai_router, prompt)
 
     return {
-        "date": date.today().isoformat(),
+        "date": local_today().isoformat(),
         "tasks": pending,
         "counts": counts,
         "schedule": schedule,
@@ -94,9 +93,9 @@ async def night_review(
         summary = await _ai_summary(ai_router, prompt)
 
     return {
-        "date": date.today().isoformat(),
+        "date": local_today().isoformat(),
         "completed_today": done_today,
         "remaining": remaining,
         "summary": summary,
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": local_now().isoformat(),
     }

@@ -23,6 +23,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from core.timeutil import local_now
+
 logger = logging.getLogger("emma.reminders")
 
 SCHEMA = """
@@ -97,7 +99,7 @@ class ReminderManager:
     # ---------- Firing ----------
     async def check_due(self) -> int:
         """Fire everything due. Called by the scheduler sweep. Returns count fired."""
-        now = datetime.now()
+        now = local_now()
         fired = 0
         for r in self.list():
             if datetime.fromisoformat(r["trigger_at"]) > now:

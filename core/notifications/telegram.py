@@ -21,6 +21,7 @@ from telegram.error import Conflict as TelegramConflict
 
 from core.busy_mode import MessengerAdapter
 from core.router.router import AIRouter, TaskType
+from core.timeutil import local_now, local_today
 
 logger = logging.getLogger("emma.notifications.telegram")
 
@@ -202,11 +203,11 @@ class TelegramMessenger(MessengerAdapter):
                 await update.message.reply_text("Schedule system not available.")
                 return
 
-            target_day = date.today()
+            target_day = local_today()
             if context.args:
                 arg = " ".join(context.args)
                 if arg == "tomorrow":
-                    target_day = date.today() + timedelta(days=1)
+                    target_day = local_today() + timedelta(days=1)
                 else:
                     try:
                         target_day = date.fromisoformat(arg)
@@ -256,11 +257,11 @@ class TelegramMessenger(MessengerAdapter):
                 return
 
             text = " ".join(args)
-            target_day = date.today()
+            target_day = local_today()
             duration_minutes = 60
 
             if "tomorrow" in text:
-                target_day = date.today() + timedelta(days=1)
+                target_day = local_today() + timedelta(days=1)
 
             dur_match = re.search(r"(\d+)\s*h", text)
             if dur_match:
@@ -497,7 +498,7 @@ class TelegramMessenger(MessengerAdapter):
                 await update.message.reply_text("That command is only available to the owner.")
                 return
 
-            target_day = date.today()
+            target_day = local_today()
             if context.args:
                 try:
                     target_day = date.fromisoformat(context.args[0])
@@ -764,7 +765,7 @@ class TelegramMessenger(MessengerAdapter):
         if not sched:
             return None
         try:
-            return sched.free_hint(datetime.now())
+            return sched.free_hint(local_now())
         except Exception as exc:
             logger.warning("free_hint failed: %s", exc)
             return None
@@ -793,8 +794,8 @@ class TelegramMessenger(MessengerAdapter):
         is_busy = bool(state and state.is_busy)
         note = state.note if state and state.note else None
 
-        today = date.today().isoformat()
-        now_str = datetime.now().strftime("%H:%M")
+        today = local_today().isoformat()
+        now_str = local_now().strftime("%H:%M")
         return {
             "owner_name": owner,
             "is_owner": self._is_owner(uid),
@@ -932,10 +933,10 @@ class TelegramMessenger(MessengerAdapter):
         sched = self._notify_mgr.schedule
         if not sched:
             return None
-        target = date.today()
+        target = local_today()
         clean = args.lower().strip()
         if clean in ("tomorrow",):
-            target = date.today() + timedelta(days=1)
+            target = local_today() + timedelta(days=1)
         elif clean:
             try:
                 target = date.fromisoformat(clean)
@@ -1147,7 +1148,7 @@ class TelegramMessenger(MessengerAdapter):
     def _action_my_day(self) -> Optional[str]:
         if not self._notify_mgr or not self._notify_mgr.schedule:
             return "Schedule not available."
-        today = date.today()
+        today = local_today()
         blocks = self._notify_mgr.schedule.list_day(today)
         if not blocks:
             return f"No blocks scheduled for {today.strftime('%A, %b %d')}."
@@ -1160,10 +1161,10 @@ class TelegramMessenger(MessengerAdapter):
     def _action_my_appointments(self, args: str) -> Optional[str]:
         if not self._appointment_mgr:
             return "Appointment system not available."
-        target = date.today()
+        target = local_today()
         clean = args.strip().lower()
         if clean in ("tomorrow",):
-            target = date.today() + timedelta(days=1)
+            target = local_today() + timedelta(days=1)
         elif clean:
             try:
                 target = date.fromisoformat(clean)

@@ -2,7 +2,7 @@
 Schedule / Planner routes — the daily timetable that powers the Planner tab
 and the bot's "when am I free" answers.
 """
-from datetime import date, datetime
+from datetime import date
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -14,6 +14,7 @@ from core.profile import ProfileManager
 from core.schedule import TimetableManager
 from core.tasks import TaskManager
 from core.tasks.project_manager import ProjectManager
+from core.timeutil import local_now, local_today
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
@@ -41,16 +42,16 @@ class DeleteDayRequest(BaseModel):
 
 def _parse_day(day: str) -> date:
     if not day or day == "today":
-        return date.today()
+        return local_today()
     try:
         return date.fromisoformat(day)
     except ValueError:
-        return date.today()
+        return local_today()
 
 
 @router.get("/free-hint")
 def free_hint(timetable: TimetableManager = Depends(get_timetable_manager)):
-    now = datetime.now()
+    now = local_now()
     return {"hint": timetable.free_hint(now), "next_free": timetable.next_free(now)}
 
 

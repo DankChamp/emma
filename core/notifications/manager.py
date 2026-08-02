@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from .telegram import TelegramMessenger
+from core.timeutil import local_now
 
 logger = logging.getLogger("emma.notifications")
 
@@ -223,7 +224,7 @@ class NotificationManager:
         if not self.schedule:
             return None
         try:
-            return self.schedule.free_hint(datetime.now())
+            return self.schedule.free_hint(local_now())
         except Exception as exc:  # noqa: BLE001 - never let scheduling break a broadcast
             logger.warning("free_hint failed: %s", exc)
             return None

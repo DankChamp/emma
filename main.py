@@ -31,6 +31,7 @@ from core.notifications import AppointmentManager, NotificationManager, Telegram
 from core.profile.manager import ProfileManager
 from core.reminders import ReminderManager
 from core.tasks.manager import TaskManager
+from core.timeutil import local_now, local_today
 from core.persistence import hf_backup
 from core.router import AIRouter
 from core.schedule import TimetableManager
@@ -272,6 +273,11 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
 def _schedule_block_notification(title: str, block_start: datetime) -> None:
     """Queue a Telegram notification for the start of a future block."""
     utc_start = _local_to_utc(block_start)
+    if utc_start <= datetime.utcnow():
+        # Never fire reminders for blocks that already started.
+        logger.info("Skipping block notification '%s' at %s — already in the past.",
+                    title, block_start.strftime("%H:%M"))
+        return
     scheduler.add_job(
         _send_block_notification,
         'date',
@@ -288,7 +294,7 @@ timetable.set_block_notify_callback(_schedule_block_notification)
 async def _schedule_block_sweep() -> None:
     """Re-create block notification jobs + sync busy mode with timetable."""
     try:
-        now = datetime.now()
+        now = local_now()
         # --- Sync busy mode ---
         state = busy_mode.get_state()
         busy_block = timetable.current_busy_block(now)
@@ -303,7 +309,7 @@ async def _schedule_block_sweep() -> None:
             logger.info("Auto free — no busy block in schedule.")
         # --- Re-create notification jobs after restart ---
         for days_offset in (0, 1):
-            day = date.today() + timedelta(days=days_offset)
+            day = local_today() + timedelta(days=days_offset)
             for block in timetable.list_day(day):
                 if not block.busy or block.start <= now:
                     continue

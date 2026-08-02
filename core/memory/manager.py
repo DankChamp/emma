@@ -7,6 +7,8 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
+from core.timeutil import local_today
+
 from .db import get_connection
 
 
@@ -150,7 +152,7 @@ class MemoryManager:
 
     # ---------- Daily (freeform text, auto-scoped to today, rolls over) ----------
     def get_daily_text(self, day: Optional[date] = None) -> str:
-        day = day or date.today()
+        day = day or local_today()
         rows = self.conn.execute(
             "SELECT value FROM daily_memory WHERE day=? AND key='_text'", (day.isoformat(),)
         ).fetchone()
@@ -161,7 +163,7 @@ class MemoryManager:
 
     # ---------- Daily (key-value) ----------
     def set_daily(self, key: str, value: str, day: Optional[date] = None) -> None:
-        day = day or date.today()
+        day = day or local_today()
         now = datetime.utcnow().isoformat()
         self.conn.execute(
             """
@@ -174,7 +176,7 @@ class MemoryManager:
         self.conn.commit()
 
     def get_daily(self, day: Optional[date] = None) -> dict[str, str]:
-        day = day or date.today()
+        day = day or local_today()
         rows = self.conn.execute(
             "SELECT key, value FROM daily_memory WHERE day=?", (day.isoformat(),)
         ).fetchall()

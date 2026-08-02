@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
+
+from core.timeutil import local_now, local_today
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -159,7 +161,7 @@ class ProjectManager:
 
     def log_study(self, subject: str, hours: float, notes: str = "",
                   day: Optional[date] = None) -> dict:
-        day = day or date.today()
+        day = day or local_today()
         cur = self.conn.execute(
             "INSERT INTO study_logs (subject, hours, notes, date, created_at) VALUES (?, ?, ?, ?, ?)",
             (subject.strip(), hours, notes, day.isoformat(), datetime.utcnow().isoformat()),
@@ -175,9 +177,9 @@ class ProjectManager:
             where.append("subject=?")
             params.append(subject)
         if days:
-            cutoff = date.today().isoformat()
-            where.append("date >= date('now', ?)")
-            params.append(f"-{days} days")
+            cutoff = (local_today() - timedelta(days=days)).isoformat()
+            where.append("date >= ?")
+            params.append(cutoff)
         sql = "SELECT * FROM study_logs"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -186,12 +188,12 @@ class ProjectManager:
         return [dict(r) for r in rows]
 
     def study_summary(self, days: int = 7) -> list[dict]:
-        cutoff = date.today().isoformat()
+        cutoff = (local_today() - timedelta(days=days)).isoformat()
         rows = self.conn.execute(
             "SELECT subject, SUM(hours) as total_hours, COUNT(*) as sessions "
-            "FROM study_logs WHERE date >= date('now', ?) "
+            "FROM study_logs WHERE date >= ? "
             "GROUP BY subject ORDER BY total_hours DESC",
-            (f"-{days} days",),
+            (cutoff,),
         ).fetchall()
         return [dict(r) for r in rows]
 

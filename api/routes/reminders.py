@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from api.deps import get_reminder_manager
 from core.reminders import ReminderManager
+from core.timeutil import local_now
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
 
@@ -37,7 +38,7 @@ def create_reminder(payload: ReminderCreate,
     elif payload.in_minutes is not None:
         if payload.in_minutes <= 0:
             raise HTTPException(400, "in_minutes must be positive")
-        trigger = datetime.now() + timedelta(minutes=payload.in_minutes)
+        trigger = local_now() + timedelta(minutes=payload.in_minutes)
     else:
         raise HTTPException(400, "Provide trigger_at or in_minutes")
     return reminders.create(payload.message, trigger, repeat=payload.repeat,

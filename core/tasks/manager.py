@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import PRIORITIES
+from core.timeutil import local_now, local_today
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -116,7 +117,7 @@ class TaskManager:
         self.conn.execute(
             "UPDATE tasks SET status=?, completed_at=? WHERE id=?",
             ("done" if done else "pending",
-             datetime.utcnow().isoformat() if done else None, task_id),
+             local_now().isoformat() if done else None, task_id),
         )
         self.conn.commit()
         return self.get(task_id)
@@ -153,7 +154,7 @@ class TaskManager:
         ).fetchall()
         if not rows:
             return ""
-        today = date.today().isoformat()
+        today = local_today().isoformat()
         lines = []
         for r in rows:
             bits = [r["title"]]
@@ -169,7 +170,7 @@ class TaskManager:
         return "\n".join(lines)
 
     def counts(self) -> dict:
-        today = date.today().isoformat()
+        today = local_today().isoformat()
         c = self.conn
         return {
             "pending": c.execute("SELECT COUNT(*) FROM tasks WHERE status='pending'").fetchone()[0],
@@ -183,7 +184,7 @@ class TaskManager:
         }
 
     def completed_today(self) -> list[dict]:
-        today = date.today().isoformat()
+        today = local_today().isoformat()
         rows = self.conn.execute(
             "SELECT * FROM tasks WHERE status='done' AND substr(completed_at,1,10)=? ORDER BY completed_at",
             (today,),

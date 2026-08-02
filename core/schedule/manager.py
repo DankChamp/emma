@@ -23,6 +23,7 @@ from typing import Callable, Optional
 
 from .emergency import insert_emergency
 from .models import TimeBlock
+from core.timeutil import local_now, local_today
 
 logger = logging.getLogger("emma.schedule")
 
@@ -106,7 +107,7 @@ class TimetableManager:
         self.conn.commit()
         saved = self.list_day(day)
         if create_reminders and self._on_block_notify:
-            now = datetime.now()
+            now = local_now()
             for b in saved:
                 if b.busy and b.start > now:
                     self._on_block_notify(b.title, b.start)
@@ -164,7 +165,7 @@ class TimetableManager:
                               contacts_text: Optional[str] = None,
                               appointments_text: Optional[str] = None,
                               memory_context: Optional[str] = None) -> dict[str, list[TimeBlock]]:
-        start = date.today()
+        start = local_today()
         profile_text = ""
         if profile:
             lines = []
@@ -224,6 +225,14 @@ class TimetableManager:
 
     async def _ai_blocks(self, text: str, day: date, memory_context: Optional[str] = None) -> Optional[list[dict]]:
         from core.router import TaskType
+        now = local_now()
+        time_note = ""
+        if day == now.date():
+            time_note = (
+                f"\nIt is currently {now.strftime('%H:%M')} on {now.date().isoformat()}."
+                f" All blocks for today MUST start after the current time ({now.strftime('%H:%M')})."
+                f" Do NOT schedule anything that has already passed."
+            )
         extra = ""
         if memory_context:
             extra = f"\n\nHere is additional context about the person's life, projects, and notes — use it to suggest realistic and relevant activities for today:\n{memory_context}\n\n"
@@ -235,14 +244,27 @@ class TimetableManager:
             '{"start":"HH:MM","end":"HH:MM","title":"...","busy":true}. '
             "Use 24-hour times (e.g. 14:30 not 2:30 PM). "
             "Order them through the day, leave short gaps between blocks, set busy=false "
-            "for breaks/free time, and make the schedule feel natural and human." + extra + "Tasks for today:\n" + text
+            "for breaks/free time, and make the schedule feel natural and human." + time_note + extra + "Tasks for the day:\n" + text
         )
         try:
             result = await self.ai_router.run(TaskType.GENERAL_ASSISTANT, prompt)
         except Exception as exc:
             logger.warning("AI timetable build failed (%s); using naive layout.", exc)
             return None
-        return self._parse_blocks(result.text)
+        blocks = self._parse_blocks(result.text)
+        # Safety net: never keep blocks that have already ended for "today".
+        if blocks and day == now.date():
+            hhmm = now.strftime("%H:%M")
+            cleaned = []
+            for b in blocks:
+                start, end = b.get("start", ""), b.get("end", "") or b.get("start", "")
+                if end and end <= hhmm:
+                    continue
+                if start and start < hhmm:
+                    b["start"] = hhmm
+                cleaned.append(b)
+            blocks = cleaned or None
+        return blocks
 
     @staticmethod
     def _parse_blocks(raw: str) -> Optional[list[dict]]:
@@ -279,7 +301,7 @@ class TimetableManager:
         cursor = time(_DEFAULT_START_HOUR, 0)
         for line in lines:
             start = cursor
-            end_dt = (datetime.combine(date.today(), start) + timedelta(hours=1)).time()
+            end_dt = (datetime.combine(local_today(), start) + timedelta(hours=1)).time()
             blocks.append({
                 "start": start.strftime("%H:%M"),
                 "end": end_dt.strftime("%H:%M"),
@@ -307,7 +329,7 @@ class TimetableManager:
 
     async def handle_emergency(self, title: str, duration_minutes: int = 60) -> dict:
         """Insert an emergency task into today's schedule, reshaping if needed."""
-        now = datetime.now()
+        now = local_now()
         day = now.date()
         blocks = self.list_day(day)
         updated, note = insert_emergency(blocks, title, duration_minutes, now)

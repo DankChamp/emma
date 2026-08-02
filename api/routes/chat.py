@@ -1,4 +1,3 @@
-from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +9,7 @@ from core.memory import MemoryManager
 from core.router import AIRouter, TaskType
 from core.schedule import TimetableManager
 from core.tasks import TaskManager
+from core.timeutil import local_now, local_today
 
 
 
@@ -44,8 +44,8 @@ async def chat(
 ):
     memory.add_turn(payload.session_id, "user", payload.message)
 
-    now = datetime.now()
-    today = date.today()
+    now = local_now()
+    today = local_today()
 
     # Build the full system context: persona + long-term text + project text + daily text.
     # This is what makes Emma actually know about her memories during conversation.
