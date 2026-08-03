@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     notifications_db_path: Path = DATA_DIR / "notifications.db"
     appointments_db_path: Path = DATA_DIR / "appointments.db"
 
+    # --- Daily auto-scheduling ---
+    # Emma builds today's timetable automatically (local time) if the day is
+    # still empty, so the day is planned without any manual button press.
+    auto_build_schedule: bool = True
+    auto_build_time: str = "06:00"
+    auto_build_notify: bool = True  # send the finished plan to Telegram
+
 
 @lru_cache
 def get_settings() -> Settings:

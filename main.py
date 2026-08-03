@@ -27,10 +27,12 @@ from api.routes import aqua as aqua_routes
 from api.routes import luna as luna_routes
 from config import get_settings
 from core.busy_mode import BusyModeManager
+from core.memory import MemoryManager
 from core.notifications import AppointmentManager, NotificationManager, TelegramMessenger
 from core.profile.manager import ProfileManager
 from core.reminders import ReminderManager
 from core.tasks.manager import TaskManager
+from core.tasks.project_manager import ProjectManager
 from core.timeutil import local_now, local_today
 from core.persistence import hf_backup
 from core.router import AIRouter
@@ -58,6 +60,8 @@ busy_mode = BusyModeManager(settings.busy_mode_db_path)
 ai_router = AIRouter(settings)
 profile_mgr = ProfileManager(settings.profile_db_path)
 task_mgr = TaskManager(settings.tasks_db_path)
+memory_mgr = MemoryManager(settings.memory_db_path)
+project_mgr = ProjectManager(settings.tasks_db_path)
 
 telegram = TelegramMessenger(
     bot_token=settings.telegram_bot_token or "",
@@ -330,10 +334,129 @@ async def _schedule_block_sweep() -> None:
         logger.warning("Schedule block sweep failed: %s", exc)
 
 
+def _auto_build_utc_cron() -> tuple[int, int]:
+    """Convert settings.auto_build_time (local HH:MM) to the UTC hour/minute
+    the APScheduler (which ticks on the server's UTC clock) should fire at."""
+    try:
+        hh, mm = (int(x) for x in settings.auto_build_time.split(":"))
+    except (ValueError, AttributeError):
+        hh, mm = 6, 0
+    today = local_today()
+    local_dt = datetime(today.year, today.month, today.day, hh, mm)
+    utc_dt = local_dt.replace(tzinfo=TZ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    return utc_dt.hour, utc_dt.minute
+
+
+async def _auto_build_daily_schedule() -> None:
+    """Fill today's timetable with a fresh AI-generated plan when it's empty.
+
+    Runs every day (and once at startup) so the day is planned automatically
+    without pressing the build button. Never overwrites a manual schedule.
+    """
+    try:
+        day = local_today()
+        if timetable.list_day(day):
+            logger.info("Auto-build: today already scheduled — skipping.")
+            return
+
+        # --- Context the generator can use to make it realistic ---
+        profile_data = profile_mgr.get_all()
+        try:
+            pending_tasks = task_mgr.list(status="pending")
+        except Exception:
+            pending_tasks = None
+        try:
+            study_summary = project_mgr.study_summary(days=7)
+        except Exception:
+            study_summary = None
+
+        contacts_text = None
+        try:
+            contacts = notifications_mgr.list_users()
+            if contacts:
+                lines = ["People to talk to:"]
+                for c in contacts:
+                    lines.append(f"- {c['label']} ({c['role']}, priority: {c['priority']})")
+                contacts_text = "\n".join(lines)
+        except Exception:
+            contacts_text = None
+
+        appointments_text = None
+        try:
+            pending_appts = appointment_mgr.list(status="pending")
+            if pending_appts:
+                lines = ["Pending appointments:"]
+                for a in pending_appts:
+                    lines.append(f"- {a['person_label']}: {a['day']} {a['start']}-{a['end']}")
+                appointments_text = "\n".join(lines)
+        except Exception:
+            appointments_text = None
+
+        memory_context = None
+        try:
+            parts = []
+            lt = memory_mgr.get_long_term_text()
+            if lt.strip():
+                parts.append(f"Long-term context:\n{lt}")
+            dt = memory_mgr.get_daily_text()
+            if dt.strip():
+                parts.append(f"Today's notes:\n{dt}")
+            projects = memory_mgr.list_projects()
+            if projects:
+                parts.append(f"Active projects: {', '.join(projects)}")
+            memory_context = "\n\n".join(parts) if parts else None
+        except Exception:
+            memory_context = None
+
+        text = (
+            "Plan a natural, well-balanced day: morning routine and breakfast, "
+            "focused work/deep-work sessions, study, meals, short breaks, some "
+            "movement or exercise, and time with my close contacts. Vary the "
+            "order and timing from the usual pattern so each day feels fresh, "
+            "but keep it realistic and achievable."
+        )
+
+        results = await timetable.build_multi_day(
+            text=text, days=1,
+            profile=profile_data,
+            pending_tasks=pending_tasks,
+            study_summary=study_summary,
+            contacts_text=contacts_text,
+            appointments_text=appointments_text,
+            memory_context=memory_context,
+        )
+        blocks = results.get(day.isoformat(), [])
+        if blocks:
+            logger.info("Auto-built today's schedule: %d blocks", len(blocks))
+            if settings.auto_build_notify:
+                lines = []
+                for b in blocks:
+                    icon = "\U0001f534" if b.busy else "\U0001f7e2"
+                    lines.append(f"{icon} {b.start:%H:%M}-{b.end:%H:%M} {b.title}")
+                await notifications_mgr.notify_owner(
+                    "\U0001f4c5 Today's schedule:\n" + "\n".join(lines)
+                )
+        else:
+            logger.warning("Auto build returned no blocks for %s", day.isoformat())
+    except Exception as exc:  # noqa: BLE001 - a failed build must not crash the app
+        logger.warning("Auto schedule build failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
     await _schedule_block_sweep()
+
+    # Plan today automatically if it's still empty, then keep it daily.
+    if settings.auto_build_schedule:
+        await _auto_build_daily_schedule()
+        hour, minute = _auto_build_utc_cron()
+        scheduler.add_job(
+            _auto_build_daily_schedule, "cron",
+            hour=hour, minute=minute,
+            id="auto-daily-schedule", replace_existing=True,
+        )
+        logger.info("Scheduled daily auto timetable build (UTC %02d:%02d)", hour, minute)
 
     # Auto-launch Aqua if configured
     if settings.aqua_auto_launch and aqua_mgr:
