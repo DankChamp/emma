@@ -681,13 +681,21 @@ chatSend.addEventListener('click', async () => {
 
 
   abortController = new AbortController();
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
   try {
     const r = await fetch(API + '/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: abortController.signal,
     });
+    if (r.status === 401) {
+      sessionStorage.removeItem('emma_token');
+      authToken = '';
+      showLogin();
+      throw new Error('Session expired — please log in again.');
+    }
     if (!r.ok) throw new Error((await r.json().catch(() => ({detail: r.statusText}))).detail || r.statusText);
     const data = await r.json();
     appendChat('assistant', `<b style="color:var(--ok)">Emma</b> <span style="color:var(--text-dim);font-size:11px">(${escapeHtml(data.provider)} / ${escapeHtml(data.model)})</span><br>${escapeHtml(data.reply).replace(/\n/g, '<br>')}`);
