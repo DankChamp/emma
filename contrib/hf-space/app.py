@@ -20,8 +20,9 @@ import main  # noqa: E402 - side effects on purpose: restore dbs, build app
 
 
 @spaces.GPU  # ZeroGPU requires at least one @spaces.GPU to start
-def _noop() -> None:
-    pass
+def _noop() -> str:
+    return "ok"
+
 
 with gr.Blocks(title="Emma") as demo:
     gr.Markdown(
@@ -30,6 +31,11 @@ with gr.Blocks(title="Emma") as demo:
         "- [Health check](/status)\n\n"
         "The Telegram bot is polling from this Space."
     )
+    # Newer HF runtimes only discover a GPU function when it's wired into the
+    # Gradio demo's event graph (a bare, unattached @spaces.GPU is missed, and
+    # the Space is then killed with "No @spaces.GPU function detected"). Tying
+    # _noop to a load event makes detection reliable across SDK versions.
+    demo.load(_noop)
 
 # Mounted at "/" so HF's health check finds gradio's /config endpoint.
 # Emma's own routes (/, /status, /ui, ...) were registered first and take
