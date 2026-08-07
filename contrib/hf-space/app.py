@@ -19,7 +19,11 @@ import gradio as gr
 import main  # noqa: E402 - side effects on purpose: restore dbs, build app
 
 
-@spaces.GPU  # ZeroGPU requires at least one @spaces.GPU function to start
+# @spaces.GPU is a class in current runtimes; instantiate it
+# (bare @spaces.GPU would hand the scanner an instance, not a callable fn,
+#  so ZeroGPU's startup scan can't see it and the Space is killed with
+#  "No @spaces.GPU function detected during startup").
+@spaces.GPU(duration=60)
 def _noop(text: str = "ping") -> str:
     return "ok"
 
