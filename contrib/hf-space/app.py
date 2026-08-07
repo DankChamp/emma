@@ -20,7 +20,7 @@ import main  # noqa: E402 - side effects on purpose: restore dbs, build app
 
 
 @spaces.GPU  # ZeroGPU requires at least one @spaces.GPU function to start
-def _noop() -> str:
+def _noop(text: str = "ping") -> str:
     return "ok"
 
 
@@ -31,14 +31,15 @@ with gr.Blocks(title="Emma") as demo:
         "- [Health check](/status)\n\n"
         "The Telegram bot is polling from this Space."
     )
-    # The HF ZeroGPU runtime only discovers a @spaces.GPU function once it is
-    # wired into the Gradio demo's component-event graph (a bare, unattached
-    # GPU function is ignored in recent runtimes, which kills the Space with
-    # "No @spaces.GPU function detected"). A hidden button.click pins _noop
-    # into that graph so GPU allocation succeeds.
-    _gpu_ping = gr.Textbox(visible=False)
+    # The HF ZeroGPU runtime's startup scan only walks Gradio event handlers
+    # bound to @spaces.GPU-decorated functions (a bare, unattached GPU function
+    # is ignored, which kills the Space with "No @spaces.GPU function detected").
+    # Wire _noop to a (hidden) button click with real inputs/outputs so GPU
+    # allocation succeeds, while keeping the landing card tidy.
+    _gpu_in = gr.Textbox(value="ping", visible=False)
+    _gpu_out = gr.Textbox(visible=False)
     _gpu_trigger = gr.Button("health check", visible=False)
-    _gpu_trigger.click(fn=_noop, inputs=None, outputs=_gpu_ping)
+    _gpu_trigger.click(fn=_noop, inputs=_gpu_in, outputs=_gpu_out)
 
 # Mounted at "/" so HF's health check finds gradio's /config endpoint.
 # Emma's own routes (/, /status, /ui, ...) were registered first and take
