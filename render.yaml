@@ -17,5 +17,3 @@ services:
         sync: false
       - key: EMMA_HF_BACKUP_REPO
         sync: false
-      - key: EMMA_SPACE_URL
-        sync: false

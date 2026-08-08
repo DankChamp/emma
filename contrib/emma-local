@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # emma-local — manage the LOCAL BACKUP instance of Emma (runit / Void Linux).
 #
-# The Hugging Face Space is the primary. Telegram allows only ONE poller per
-# bot token, and both sides push database snapshots to the same HF Dataset,
-# so the Space must be PAUSED while the local instance runs — otherwise the
-# Space's periodic backup will overwrite yours (last writer wins).
+# The Render deployment (https://emma-mlhn.onrender.com) is the primary.
+# Telegram allows only ONE poller per bot token, and both sides push database
+# snapshots to the same HF Dataset, so the deployed instance must be STOPPED
+# while the local instance runs — otherwise its periodic backup overwrites
+# yours (last writer wins).
 #
 #   emma-local start [--force]  pull latest DB snapshot, start the service
 #   emma-local stop             stop the service, push DBs back to the Dataset
@@ -15,7 +16,7 @@
 # accepted trade-off for a manual failover instance.
 #
 # Requires in /home/void/AI/emma/.env: HF_TOKEN, EMMA_HF_BACKUP_REPO
-# (and EMMA_SPACE_URL for the safety probe, e.g. https://user-emma.hf.space)
+# (EMMA_PROBE_URL overrides the safety-probe URL, default the Render instance)
 set -euo pipefail
 
 EMMA_DIR=/home/void/AI/emma
@@ -28,7 +29,8 @@ env_get() { # env_get KEY — read one value from .env without sourcing it
 load_env() {
     HF_TOKEN=$(env_get HF_TOKEN)
     EMMA_HF_BACKUP_REPO=$(env_get EMMA_HF_BACKUP_REPO)
-    EMMA_SPACE_URL=$(env_get EMMA_SPACE_URL)
+    EMMA_PROBE_URL=$(env_get EMMA_PROBE_URL)
+    EMMA_PROBE_URL="${EMMA_PROBE_URL:-https://emma-mlhn.onrender.com}"
     export HF_TOKEN EMMA_HF_BACKUP_REPO
 }
 
@@ -49,10 +51,10 @@ sync_db() { # sync_db restore|upload
 case "${1:-}" in
     start)
         load_env
-        if [ "${2:-}" != "--force" ] && [ -n "${EMMA_SPACE_URL:-}" ]; then
-            if curl -fsS -m 10 "$EMMA_SPACE_URL/" >/dev/null 2>&1; then
-                echo "✗ The HF Space at $EMMA_SPACE_URL is still UP." >&2
-                echo "  Pause it first (Space settings → Pause), or re-run with --force." >&2
+        if [ "${2:-}" != "--force" ] && [ -n "${EMMA_PROBE_URL:-}" ]; then
+            if curl -fsS -m 10 "$EMMA_PROBE_URL/" >/dev/null 2>&1; then
+                echo "✗ The deployed instance at $EMMA_PROBE_URL is still UP." >&2
+                echo "  Stop it first (Render dashboard), or re-run with --force." >&2
                 exit 1
             fi
         fi
@@ -66,7 +68,7 @@ case "${1:-}" in
         # land before we snapshot and push.
         sudo sv -w 30 down emma
         sync_db upload
-        echo "Emma local stopped; databases pushed. Unpause the Space now."
+        echo "Emma local stopped; databases pushed. The deployed instance can be resumed."
         ;;
     status)
         sudo sv status emma 2>/dev/null \
