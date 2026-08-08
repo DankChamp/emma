@@ -11,6 +11,7 @@ Everything else stays per-request (see api/deps.py). No business logic here.
 """
 import asyncio
 import logging
+import time
 from datetime import date, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks, facts, ingest
@@ -519,6 +520,12 @@ app.include_router(ingest.router)
 WEB_DIR = Path(__file__).resolve().parent / "web"
 if WEB_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(WEB_DIR), html=True), name="ui")
+    _login_page = str(WEB_DIR / "login.html")
+
+    @app.get("/login")
+    @app.get("/login/")
+    def login_page():
+        return FileResponse(_login_page)
 
 
 @app.get("/")
@@ -565,26 +572,71 @@ from pydantic import BaseModel
 class LoginRequest(BaseModel):
     password: str
 
+# Login attempt limiting: 3 failed attempts per client locks login for 15 min.
+_ATTEMPT_LIMIT = 3
+_ATTEMPT_LOCK_SECONDS = 15 * 60
+_login_attempts: dict[str, dict] = {}
+
+def _login_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+def _check_login_lock(key: str) -> None:
+    rec = _login_attempts.get(key)
+    if rec and rec.get("locked_until"):
+        if time.time() < rec["locked_until"]:
+            wait = int(rec["locked_until"] - time.time()) + 1
+            raise HTTPException(
+                429,
+                f"Too many failed attempts — locked. Try again in {wait}s",
+                headers={"Retry-After": str(wait)},
+            )
+        _login_attempts.pop(key, None)
+
 @app.post("/api/auth")
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, request: Request):
     logger.info("login attempt — password set=%s", bool(settings.web_password))
+    key = _login_key(request)
+    _check_login_lock(key)
     if settings.web_password and payload.password == settings.web_password:
-        return {"ok": True}
-    logger.warning("login failed — wrong password")
-    raise HTTPException(401, "Wrong password")
+        _login_attempts.pop(key, None)
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            "emma_token",
+            payload.password,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return response
+    rec = _login_attempts.setdefault(key, {"fails": 0, "locked_until": 0})
+    rec["fails"] += 1
+    if rec["fails"] >= _ATTEMPT_LIMIT:
+        rec["locked_until"] = time.time() + _ATTEMPT_LOCK_SECONDS
+        logger.warning("login locked out (ip=%s, fails=%s)", key, rec["fails"])
+        raise HTTPException(
+            429,
+            detail="Too many failed attempts — locked. Try again in 15 minutes",
+            headers={"Retry-After": str(_ATTEMPT_LOCK_SECONDS)},
+        )
+    left = _ATTEMPT_LIMIT - rec["fails"]
+    logger.warning("login failed — wrong password (ip=%s, fails=%s)", key, rec["fails"])
+    raise HTTPException(401, f"Wrong password. {left} attempt(s) left")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     if not settings.web_password:
         return await call_next(request)
-    # Public paths
-    if request.url.path in ("/", "/health", "/api/auth") or request.url.path.startswith("/ui/"):
+    # Public paths: the login page itself, its endpoint, health + root status
+    if request.url.path in ("/", "/health", "/api/auth", "/login", "/login/"):
         return await call_next(request)
     # Check Authorization header
     auth = request.headers.get("Authorization", "")
     if auth == f"Bearer {settings.web_password}":
         return await call_next(request)
-    # Check cookie (set by frontend after login)
+    # Check cookie (set after successful login)
     if request.cookies.get("emma_token") == settings.web_password:
         return await call_next(request)
+    # Normal pages are only reachable when authorized; otherwise bounce to login
+    if request.url.path.startswith("/ui/"):
+        return RedirectResponse("/login/", status_code=302)
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
