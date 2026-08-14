@@ -748,22 +748,29 @@ def _check_login_lock(key: str) -> None:
 
 @app.post("/api/auth")
 def login(payload: LoginRequest, request: Request, response: Response):
-    logger.info("login attempt — password set=%s", bool(settings.web_password))
+    logger.info("login attempt — password set=%s, hash_len=%s", bool(settings.web_password), len(_get_web_password_hash()) if _get_web_password_hash() else 0)
     key = _login_key(request)
     _check_login_lock(key)
     
     password_hash = _get_web_password_hash()
-    if password_hash and _verify_password(payload.password, password_hash):
+    if not password_hash:
+        logger.error("web_password not configured")
+        raise HTTPException(500, "Server not configured for web auth")
+    
+    if _verify_password(payload.password, password_hash):
         _login_attempts.pop(key, None)
         # Create JWT session token
         token = _create_session_token({"sub": "user", "type": "web"})
         response = JSONResponse({"ok": True})
+        # Render terminates TLS at load balancer; check X-Forwarded-Proto
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        is_https = forwarded_proto == "https" or request.url.scheme == "https"
         response.set_cookie(
             "emma_session",
             token,
             httponly=True,
-            secure=False,  # Set to True in production with HTTPS
-            samesite="lax",
+            secure=is_https,
+            samesite="lax" if is_https else "none",
             path="/",
             max_age=JWT_EXPIRY_HOURS * 3600,
         )
