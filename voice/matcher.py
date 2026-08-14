@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
+from typing import Optional
 
 _PUNCT_RE = re.compile(r"[^a-z0-9\s]")
 
@@ -59,3 +60,49 @@ def contains_wake_word(transcript: str, wake_word: str, threshold: float = 0.70)
             best = max(best, _similarity(window, wake_norm))
 
     return best >= threshold
+
+
+def tail_after_wake_word(
+    transcript: str, wake_word: str, threshold: float = 0.70
+) -> Optional[str]:
+    """
+    Return words after the best wake-word match, or None if no match exists.
+
+    This mirrors contains_wake_word's fuzzy matching. It avoids passing a
+    noisy wake phrase like "hey and ma" through as part of the command when
+    the exact configured phrase ("hey emma") was not present literally.
+    """
+    wake_norm = normalize(wake_word)
+    transcript_norm = normalize(transcript)
+    if not wake_norm or not transcript_norm:
+        return None
+
+    words = transcript_norm.split()
+    wake_words = wake_norm.split()
+    literal_start = _find_subsequence(words, wake_words)
+    if literal_start is not None:
+        return " ".join(words[literal_start + len(wake_words) :]).strip()
+
+    wake_len = len(wake_words)
+    best_score = 0.0
+    best_end = None
+    for span in range(max(1, wake_len - 1), wake_len + 2):
+        for start in range(0, max(1, len(words) - span + 1)):
+            window = " ".join(words[start : start + span])
+            score = _similarity(window, wake_norm)
+            if score > best_score:
+                best_score = score
+                best_end = start + span
+
+    if best_end is None or best_score < threshold:
+        return None
+    return " ".join(words[best_end:]).strip()
+
+
+def _find_subsequence(words: list[str], needle: list[str]) -> Optional[int]:
+    if not needle or len(needle) > len(words):
+        return None
+    for start in range(0, len(words) - len(needle) + 1):
+        if words[start : start + len(needle)] == needle:
+            return start
+    return None

@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # Everything here is offline/local - no audio ever leaves the machine.
     voice_wake_word: str = "hey emma"
     voice_backend_url: str = "http://127.0.0.1:8000"
+    # Voice conversations should stay local by default: the voice client
+    # asks the backend to use only local providers (Ollama / local_generic)
+    # and never fall back to cloud providers.
+    voice_local_only: bool = True
     voice_vosk_model_path: Optional[str] = None  # path to an unzipped Vosk model dir
     voice_input_device: Optional[str] = None  # sounddevice device name/index, None = system default
     voice_command_timeout_seconds: float = 8.0
@@ -69,13 +73,33 @@ class Settings(BaseSettings):
     # "hey emma" over her reply to cut her off and immediately give a new
     # command. Turn off if she keeps hearing her own voice through the mic.
     voice_barge_in: bool = True
+    # Intent gate: after the wake word, Emma's backend decides whether the
+    # utterance is actually addressed to her before she speaks (so she
+    # doesn't answer conversations that aren't hers). Adds one lightweight
+    # LLM call per wake-up; the gate's output is never spoken.
+    voice_judge_enabled: bool = True
+    # Streaming reply speech formatter: sentences shorter than min_chars
+    # wait for the next one before being spoken; longer ones are split so
+    # a single CPU synthesis call stays short.
+    voice_stream_min_chars: int = 15
+    voice_stream_max_chars: int = 320
 
     # --- Text-to-speech (how Emma sounds) ---
-    # Engine: "auto" uses the natural neural Piper voice if a model is
-    # installed (run `python voice/download_voice.py`) and quietly falls back
-    # to the robotic system voice otherwise; "piper" forces neural; "pyttsx3"
+    # Engine: "auto" uses Chatterbox (voice-cloned neural TTS) when its
+    # sidecar + reference voice are ready, else the natural neural Piper
+    # voice if a model is installed (run `python voice/download_voice.py`),
+    # and quietly falls back to the robotic system voice otherwise;
+    # "chatterbox" forces Chatterbox; "piper" forces neural; "pyttsx3"
     # forces the legacy system voice.
     voice_tts_engine: str = "auto"
+    # Chatterbox: a ~10s WAV of the voice Emma should be cloned from. This
+    # is required for the chatterbox engine (run `python voice/check_reference.py`).
+    voice_chatterbox_reference_wav: Optional[str] = None
+    # "turbo" (350M, best quality) or "nano" (110M, 3x realtime on 8 CPU
+    # cores). When "turbo" is set, a slow CPU (realtime factor > 1.2)
+    # automatically falls back to "nano" on first use.
+    voice_chatterbox_variant: str = "turbo"
+    voice_chatterbox_auto_fallback: bool = True
     # Piper voice model. Blank = auto-pick a feminine voice from voice/models.
     # Can be a full path or a bare name like "en_US-amy-medium".
     voice_piper_model_path: Optional[str] = None
@@ -97,7 +121,11 @@ class Settings(BaseSettings):
 
     # --- Time zone (IANA name like Asia/Kolkata, America/New_York) ---
     # Used to correctly schedule notifications from local timetable times.
-    tz: str = "Asia/Kolkata"
+    # Accepts EMMA_TZ (documented in .env.example) or the classic TZ.
+    tz: str = Field(
+        "Asia/Kolkata",
+        validation_alias=AliasChoices("EMMA_TZ", "TZ"),
+    )
 
     # --- Web UI password protection ---
     # If set, the web UI and API require this password to access.
@@ -123,8 +151,14 @@ class Settings(BaseSettings):
 
     # --- Telegram notification bot ---
     telegram_bot_token: Optional[str] = None
-    owner_name: str = "VOID"
-    owner_telegram_id: Optional[int] = None
+    owner_name: str = Field(
+        "VOID",
+        validation_alias=AliasChoices("EMMA_OWNER_NAME", "OWNER_NAME"),
+    )
+    owner_telegram_id: Optional[int] = Field(
+        None,
+        validation_alias=AliasChoices("EMMA_OWNER_TELEGRAM_ID", "OWNER_TELEGRAM_ID"),
+    )
     notifications_db_path: Path = DATA_DIR / "notifications.db"
     appointments_db_path: Path = DATA_DIR / "appointments.db"
 

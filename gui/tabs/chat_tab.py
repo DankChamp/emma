@@ -286,20 +286,24 @@ class ChatTab(QWidget):
         provider = self.provider_combo.currentText() if self.manual_check.isChecked() else None
         model = self.model_combo.currentText().strip() if self.manual_check.isChecked() else None
 
+        # Read the persona on the main thread: the callback runs on a worker
+        # thread, where touching a QWidget is forbidden.
+        persona = self._get_persona_text()
         chat_fn = lambda: self.client.chat(
             message,
             session_id=session_id,
             task_type=task_type,
             provider=provider or None,
             model=model or None,
-            system=self._get_persona_text(),
+            system=persona,
         )
 
-        self._pending_worker = self.client.call(
+        worker = self.client.call(
             chat_fn,
-            on_success=lambda data: self._on_reply(message, data),
-            on_error=self._on_error,
+            on_success=lambda data: self._on_reply(message, data, worker),
+            on_error=lambda e: self._on_error(e, worker),
         )
+        self._pending_worker = worker
 
     def _get_persona_text(self) -> str:
         text = self.persona_edit.toPlainText().strip()
@@ -315,8 +319,11 @@ class ChatTab(QWidget):
         self.send_btn.setEnabled(True)
         self.interrupt_btn.setEnabled(False)
 
-    def _on_reply(self, user_message: str, data: dict):
-        if self._pending_worker is None:
+    def _on_reply(self, user_message: str, data: dict, worker):
+        # Only the current request may render: after an interrupt, a
+        # superseded request's late reply must neither display nor flip the
+        # pending state (which would swallow the reply of the new request).
+        if self._pending_worker is not worker:
             return
         self._pending_worker = None
         reply = data.get("reply", "")
@@ -329,8 +336,8 @@ class ChatTab(QWidget):
         self.last_exchange = (user_message, reply)
         self.save_btn.setEnabled(True)
 
-    def _on_error(self, message: str):
-        if self._pending_worker is None:
+    def _on_error(self, message: str, worker):
+        if self._pending_worker is not worker:
             return
         self._pending_worker = None
         self._append_system(f"⚠ {message}")
@@ -386,5 +393,5 @@ class ChatTab(QWidget):
                     category=category, project=project,
                 ),
                 on_success=lambda _, _k=key: self._append_system(f"Saved to memory: {_k}"),
-                on_error=self._on_error,
+                on_error=lambda e: self._append_system(f"⚠ Save failed: {e}"),
             )

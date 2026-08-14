@@ -47,6 +47,10 @@ NAG_MINUTES = 5  # persistent reminders re-fire this often until dismissed
 class ReminderManager:
     def __init__(self, db_path: Path, notifications=None, busy_mode=None):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Shared connections: WAL + busy_timeout so concurrent
+        # writers (event loop, sweeps, Telegram) wait instead of 500ing.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self._migrate()

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time
 from typing import Any
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -60,7 +60,7 @@ class ScheduleTab(QWidget):
         # Table
         layout.addWidget(QLabel("Schedule:"))
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Start", "End", "Title", "Busy", "Notify"])
+        self.table.setHorizontalHeaderLabels(["Start", "End", "Title", "Busy"])
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -119,7 +119,7 @@ class ScheduleTab(QWidget):
     def _on_status(self, data: Any):
         if isinstance(data, dict) and data.get("is_busy"):
             note = data.get("note", "")
-            txt = f"● Busy" + (f" - {note}" if note else "")
+            txt = "● Busy" + (f" - {note}" if note else "")
             self.status_label.setText(txt)
             self.status_label.setStyleSheet("font-weight:600;color:#f59e0b")
         else:
@@ -148,10 +148,6 @@ class ScheduleTab(QWidget):
             busy_cb = QCheckBox()
             busy_cb.setChecked(bool(b.get("busy", True)))
             self.table.setCellWidget(i, 3, busy_cb)
-
-            notify_cb = QCheckBox()
-            notify_cb.setChecked(True)
-            self.table.setCellWidget(i, 4, notify_cb)
 
         if not blocks:
             self.table.setRowCount(0)
@@ -236,7 +232,6 @@ class ScheduleTab(QWidget):
             end_w = self.table.cellWidget(i, 1)
             title_item = self.table.item(i, 2)
             busy_w = self.table.cellWidget(i, 3)
-            notify_w = self.table.cellWidget(i, 4)
 
             start_t = start_w.time() if isinstance(start_w, QTimeEdit) else time(9, 0)
             end_t = end_w.time() if isinstance(end_w, QTimeEdit) else time(10, 0)

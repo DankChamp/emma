@@ -8,7 +8,6 @@ After Emma's AI responds, this module:
   4. Returns a summary of what was executed (for logging/reporting)
 """
 import logging
-from typing import Optional
 
 from core.tools.registry import get_registry
 from core.tools.parser import parse_directives

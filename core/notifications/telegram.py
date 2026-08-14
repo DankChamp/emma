@@ -158,7 +158,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /start ----------
         async def _start(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.username or str(uid)
+            uid = user.id
+            name = user.full_name or user.username or str(uid)
             chat_id = update.effective_chat.id
             self._register(uid, name, chat_id)
             self._log("connect", uid, name, "/start")
@@ -171,7 +172,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /menu ----------
         async def _menu(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, "/menu")
             menu = self._build_menu(self._is_owner(uid))
@@ -183,7 +185,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /help ----------
         async def _help(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, "/help")
             text = HELP_TEXT.format(owner_name=owner)
@@ -194,7 +197,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /myslots ----------
         async def _myslots(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, update.message.text)
 
@@ -239,7 +243,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /book ----------
         async def _book(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             chat_id = update.effective_chat.id
             self._register(uid, name, chat_id)
             self._log("command", uid, name, update.message.text)
@@ -313,7 +318,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /mybookings ----------
         async def _mybookings(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, "/mybookings")
 
@@ -340,7 +346,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /cancel ----------
         async def _cancel(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, update.message.text)
 
@@ -380,7 +387,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /pending (owner only) ----------
         async def _pending(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, "/pending")
 
@@ -409,7 +417,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /confirm (owner only) ----------
         async def _confirm(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, update.message.text)
 
@@ -449,7 +458,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /reject (owner only) ----------
         async def _reject(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, update.message.text)
 
@@ -490,7 +500,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /appointments (owner only) ----------
         async def _appointments_handler(update: Update, context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, update.message.text)
 
@@ -527,7 +538,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- /status (owner only) ----------
         async def _status(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             self._register(uid, name, update.effective_chat.id)
             self._log("command", uid, name, "/status")
 
@@ -549,7 +561,8 @@ class TelegramMessenger(MessengerAdapter):
         # ---------- Free-text handler ----------
         async def _handle_text(update: Update, _context):
             user = update.effective_user
-            uid, name = user.id, user.full_name or user.first_name or str(uid)
+            uid = user.id
+            name = user.full_name or user.first_name or str(uid)
             text = update.message.text
             chat_id = update.effective_chat.id
             self._register(uid, name, chat_id)
@@ -1289,8 +1302,11 @@ class TelegramMessenger(MessengerAdapter):
                     return
 
     async def stop(self):
-        if not self._started or not self._app:
+        if not self._app:
             return
+        # Always tear the Application down, even when polling never started
+        # (e.g. every retry failed): an initialized Application owns a
+        # long-poll network task that must not be leaked.
         if self._stop_event:
             self._stop_event.set()
         if self._poll_task and not self._poll_task.done():
@@ -1298,11 +1314,15 @@ class TelegramMessenger(MessengerAdapter):
                 await asyncio.wait_for(self._poll_task, timeout=5)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._poll_task.cancel()
-        await self._app.updater.stop()
-        await self._app.stop()
-        await self._app.shutdown()
-        self._started = False
-        logger.info("Telegram bot stopped.")
+        try:
+            if self._app.updater and self._app.updater.running:
+                await self._app.updater.stop()
+            await self._app.stop()
+            await self._app.shutdown()
+        finally:
+            self._app = None
+            self._started = False
+            logger.info("Telegram bot stopped.")
 
     # ------------------------------------------------------------------
     # Outbound messaging

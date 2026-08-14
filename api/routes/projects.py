@@ -49,14 +49,6 @@ def list_projects(status: Optional[str] = None,
     return pm.list_projects(status=status)
 
 
-@router.get("/{project_id}")
-def get_project(project_id: int, pm: ProjectManager = Depends(get_project_manager)):
-    p = pm.get_project(project_id)
-    if not p:
-        raise HTTPException(404, "Project not found")
-    return p
-
-
 @router.post("")
 def create_project(payload: ProjectCreate,
                    pm: ProjectManager = Depends(get_project_manager)):
@@ -135,7 +127,13 @@ def study_summary(days: int = 7, pm: ProjectManager = Depends(get_project_manage
 @router.post("/study")
 def log_study(payload: StudyLogCreate,
               pm: ProjectManager = Depends(get_project_manager)):
-    day = date.fromisoformat(payload.date) if payload.date else None
+    if payload.date:
+        try:
+            day = date.fromisoformat(payload.date)
+        except ValueError:
+            raise HTTPException(400, f"'{payload.date}' is not a valid date (expected YYYY-MM-DD)")
+    else:
+        day = None
     return pm.log_study(payload.subject, payload.hours, notes=payload.notes, day=day)
 
 
@@ -144,3 +142,11 @@ def delete_study(log_id: int, pm: ProjectManager = Depends(get_project_manager))
     if not pm.delete_study_log(log_id):
         raise HTTPException(404, "Study log not found")
     return {"ok": True}
+
+
+@router.get("/{project_id}")
+def get_project(project_id: int, pm: ProjectManager = Depends(get_project_manager)):
+    p = pm.get_project(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    return p

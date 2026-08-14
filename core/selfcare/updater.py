@@ -118,7 +118,7 @@ class UpdateManager:
             return []
         try:
             log_run = subprocess.run(
-                ["git", "log", f"-n", str(n), "--format=%h|%an|%ad|%s", "--date=short"],
+                ["git", "log", "-n", str(n), "--format=%h|%an|%ad|%s", "--date=short"],
                 cwd=str(self.base_dir),
                 capture_output=True,
                 text=True,

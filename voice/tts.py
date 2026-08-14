@@ -4,20 +4,26 @@ Speaker - offline text-to-speech, "just on my computer".
 Emma speaks with a natural, feminine voice through Piper, a small neural
 TTS engine that runs entirely on the CPU with no network calls:
 
-  - Piper (preferred)  -> neural voices that actually sound human. Ships a
-                          curated feminine default ("Amy"). Fully offline;
-                          the voice model is a local .onnx file.
-  - pyttsx3 (fallback) -> wraps whatever robotic TTS the OS already has
-                          (SAPI5 / NSSpeech / espeak-ng). Used only when no
-                          Piper voice is installed, so Emma still talks even
-                          on a bare machine.
+  - Chatterbox (preferred) -> voice-cloned neural TTS (Chatterbox-Turbo,
+                              350M, with the 110M Nano as a CPU fallback).
+                              By far the most natural voice; needs a ~10s
+                              reference WAV of the voice to clone.
+  - Piper                  -> neural voices that actually sound human. Ships a
+                              curated feminine default ("Amy"). Fully offline;
+                              the voice model is a local .onnx file.
+  - pyttsx3 (fallback)     -> wraps whatever robotic TTS the OS already has
+                              (SAPI5 / NSSpeech / espeak-ng). Used only when no
+                              natural voice is available, so Emma still talks
+                              even on a bare machine.
 
 Nothing here ever goes over the network once the voice model is on disk.
 
 Backend selection (``engine``):
-    "auto"     -> Piper if a voice model is available, else pyttsx3
-    "piper"    -> Piper only (raises if unavailable)
-    "pyttsx3"  -> the legacy system voice only
+    "auto"      -> Chatterbox if its sidecar + reference voice are ready,
+                   else Piper if a voice model is available, else pyttsx3
+    "chatterbox"-> Chatterbox only (raises with fix-it guidance if unavailable)
+    "piper"     -> Piper only (raises if unavailable)
+    "pyttsx3"   -> the legacy system voice only
 
 Design notes:
   - The Piper voice is loaded once and reused. Loading the ~60MB ONNX model
@@ -288,6 +294,9 @@ class Speaker:
         noise_w_scale: float = 0.8,
         volume: float = 1.0,
         speaker_id: Optional[int] = None,
+        chatterbox_reference_wav: Optional[str] = None,
+        chatterbox_variant: str = "turbo",
+        chatterbox_auto_fallback: bool = True,
     ):
         self.rate = rate
         self.voice_hint = voice_hint
@@ -295,9 +304,42 @@ class Speaker:
         self._backend_name = "none"
 
         engine = (engine or "auto").lower()
+        want_chatterbox = engine in ("auto", "chatterbox")
+
+        if want_chatterbox:
+            try:
+                from .tts_chatterbox import ChatterboxBackend, ChatterboxUnavailableError
+
+                if not chatterbox_reference_wav:
+                    if engine == "chatterbox":
+                        raise RuntimeError(
+                            "No VOICE_CHATTERBOX_REFERENCE_WAV set. Point it at a ~10s WAV "
+                            "of the voice Emma should be cloned from (see voice/check_reference.py)."
+                        )
+                    logger.info(
+                        "No chatterbox reference voice configured; using the next voice backend. "
+                        "Set VOICE_CHATTERBOX_REFERENCE_WAV to a ~10s WAV to enable it."
+                    )
+                else:
+                    self._backend = ChatterboxBackend(
+                        chatterbox_reference_wav,
+                        variant=chatterbox_variant,
+                        auto_fallback=chatterbox_auto_fallback,
+                    )
+                    self._backend.start()
+                    self._backend_name = self._backend.backend_name
+            except ChatterboxUnavailableError as exc:
+                logger.warning("Chatterbox unavailable: %s", exc)
+                if engine == "chatterbox":
+                    raise
+            except Exception as exc:  # noqa: BLE001 - fall back rather than go mute
+                logger.warning("Couldn't start chatterbox (%s); using the next voice backend.", exc)
+                if engine == "chatterbox":
+                    raise
+
         want_piper = engine in ("auto", "piper")
 
-        if want_piper:
+        if want_piper and self._backend is None:
             model = _discover_piper_model(piper_model_path)
             if model is not None:
                 try:
@@ -350,6 +392,15 @@ class Speaker:
         first (marked ``engine="piper"``), then system pyttsx3 voices.
         """
         voices: list[dict] = []
+
+        # Chatterbox is a separate process (sidecar venv); it's "installed"
+        # whenever that venv exists on this machine.
+        from .tts_chatterbox import SIDECAR_PYTHON
+
+        if SIDECAR_PYTHON.is_file():
+            voices.append(
+                {"id": "chatterbox", "name": "Chatterbox neural clone (Turbo/Nano)", "engine": "chatterbox"}
+            )
 
         for onnx in sorted(MODELS_DIR.glob("*.onnx")) if MODELS_DIR.is_dir() else []:
             voices.append({"id": str(onnx), "name": onnx.stem, "engine": "piper"})

@@ -4,7 +4,6 @@ the right. Deliberately simple navigation (QListWidget + QStackedWidget)
 so adding a future section is a two-line change, matching the same
 "modular, easy to extend" principle the backend follows.
 """
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,

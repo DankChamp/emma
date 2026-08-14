@@ -4,14 +4,16 @@ emma_cli.py and gui/api_client.py: just an HTTP client, no business logic.
 """
 from __future__ import annotations
 
-from typing import Optional, Any
+import json
+from typing import Any, Iterator, Optional
 
 import httpx
 
 
 class VoiceBackendClient:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, local_only: bool = True):
         self.base_url = base_url.rstrip("/")
+        self.local_only = local_only
 
     def chat(self, message: str, session_id: str = "voice", system: Optional[str] = None) -> str:
         """
@@ -20,7 +22,12 @@ class VoiceBackendClient:
         like every other client - the voice loop doesn't get special
         treatment, it's just another way of talking to Emma.
         """
-        body = {"message": message, "session_id": session_id, "task_type": "conversation"}
+        body = {
+            "message": message,
+            "session_id": session_id,
+            "task_type": "conversation",
+            "local_only": self.local_only,
+        }
         if system:
             body["system"] = system
         resp = httpx.post(
@@ -30,6 +37,63 @@ class VoiceBackendClient:
         )
         resp.raise_for_status()
         return resp.json()["reply"]
+
+    def chat_stream(
+        self,
+        message: str,
+        session_id: str = "voice",
+        system: Optional[str] = None,
+    ) -> Iterator[str]:
+        """
+        Send a command to Emma and stream her reply back chunk by chunk
+        (SSE), so the voice loop can start synthesizing speech while the
+        reply is still being generated. Raises RuntimeError with Emma's
+        reason if the stream reports an error event or dies early.
+        """
+        body = {
+            "message": message,
+            "session_id": session_id,
+            "task_type": "conversation",
+            "stream": True,
+            "local_only": self.local_only,
+        }
+        if system:
+            body["system"] = system
+
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/chat",
+            json=body,
+            timeout=120.0,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = json.loads(line[len("data:"):].strip())
+                event = data.get("event")
+                if event == "text":
+                    yield data.get("text", "")
+                elif event == "error":
+                    raise RuntimeError(data.get("detail", "unknown streaming error"))
+                elif event == "done":
+                    return
+
+    def judge(self, message: str) -> dict[str, Any]:
+        """
+        Wake-word intent gate: asks Emma whether the wake-word utterance is
+        actually addressed to her, and if so what the intent is. The reply
+        is a JSON object (`should_respond` bool + `intent` string) consumed
+        by the voice loop - it is never spoken.
+        """
+        resp = httpx.post(
+            f"{self.base_url}/chat/judge",
+            json={"message": message, "local_only": self.local_only},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     def get_persona(self) -> str:
         try:

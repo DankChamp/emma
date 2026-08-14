@@ -36,5 +36,10 @@ def local_today() -> date:
     return local_now().date()
 
 
+def local_tz() -> ZoneInfo:
+    """The settings timezone, for converting aware datetimes to local."""
+    return _zone()
+
+
 def tz_name() -> str:
     return get_settings().tz or "UTC"

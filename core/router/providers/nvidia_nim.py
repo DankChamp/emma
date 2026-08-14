@@ -2,11 +2,11 @@
 NVIDIA NIM provider - used for coding and stronger reasoning tasks via
 student API access. OpenAI-compatible endpoint.
 """
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
-from .base import AIProvider, CompletionResult
+from .base import AIProvider, CompletionResult, _openai_stream
 
 NIM_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
@@ -41,3 +41,19 @@ class NvidiaNIMProvider(AIProvider):
 
         text = data["choices"][0]["message"]["content"]
         return CompletionResult(text=text, provider=self.name, model=model, raw=data)
+
+    async def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> AsyncIterator[str]:
+        if not self.api_key:
+            raise RuntimeError("NVIDIA NIM provider called with no API key configured")
+
+        model = kwargs.get("model", self.default_model)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {"model": model, "messages": messages, "stream": True}
+
+        async for piece in _openai_stream(NIM_API_URL, headers, payload):
+            yield piece

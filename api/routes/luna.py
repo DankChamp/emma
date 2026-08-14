@@ -1,7 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from api.deps import get_luna_manager, get_memory_manager
-from core.memory import MemoryManager
 
 router = APIRouter(prefix="/luna", tags=["luna"])
 

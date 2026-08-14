@@ -213,11 +213,11 @@ body.is-local .local-only { display: revert !important; }
   <!-- ===== VOICE ===== -->
   <div class="page" id="page-voice">
     <div class="page-title">Voice</div>
-    <p class="text-dim text-sm mb-8">Runs emma_voice.py as a background process. Say the wake word, then your command - Emma answers out loud.</p>
+    <p class="text-dim text-sm mb-8">Voice mode runs on your local machine only. A hosted browser page cannot start the microphone process on your computer.</p>
     <div class="row mb-8">
       <span class="text-dim">Wake word:</span>
       <input id="voice-wakeword" value="hey emma" style="width:200px">
-      <button id="voice-start" class="ok">Start Listening</button>
+      <button id="voice-start" class="ok">Show Command</button>
       <button id="voice-stop" class="danger" disabled>Stop</button>
     </div>
     <div id="voice-status" class="text-dim text-sm mb-8">Not running.</div>
@@ -691,14 +691,15 @@ document.getElementById('chat-clear').addEventListener('click', () => {
 const voiceLog = document.getElementById('voice-log');
 const voiceStatus = document.getElementById('voice-status');
 
-// Voice is a subprocess on the backend - we simulate the GUI's behavior
-// by showing instructions. The actual emma_voice.py runs on the server.
+// Voice is intentionally local-only. A web page served from Render cannot
+// launch the microphone/TTS process on the user's machine, so this page only
+// shows the exact local command to run.
 document.getElementById('voice-start').addEventListener('click', () => {
-  voiceStatus.textContent = 'Start the voice assistant from the CLI: ./emma_voice.py --wake-word "hey emma"';
+  const wake = document.getElementById('voice-wakeword').value.trim() || 'hey emma';
+  const command = `./run_voice.sh --wake-word "${wake.replace(/"/g, '\\"')}" --backend-url http://127.0.0.1:8000`;
+  voiceStatus.textContent = 'Run voice locally from the project folder.';
   voiceStatus.style.color = '#2dd4bf';
-  document.getElementById('voice-start').disabled = true;
-  document.getElementById('voice-stop').disabled = false;
-  voiceLog.textContent += `[${new Date().toLocaleTimeString()}] Voice assistant started (listening for wake word)\n`;
+  voiceLog.textContent = `${command}\n\nVoice uses local speech recognition/TTS and local AI providers by default. Use --allow-remote-ai only when you explicitly want cloud model fallback.`;
 });
 document.getElementById('voice-stop').addEventListener('click', () => {
   voiceStatus.textContent = 'Not running.';

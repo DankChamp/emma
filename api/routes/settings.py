@@ -155,6 +155,7 @@ def set_provider_key(provider: str, payload: ProviderKeyUpdate):
         raise HTTPException(400, f"Provider '{provider}' doesn't use an API key")
 
     update_env_file({entry["api_key"]: payload.api_key.strip()})
+    _reload_providers()
     return {"ok": True}
 
 
@@ -165,12 +166,14 @@ def set_provider_model(provider: str, payload: ProviderModelUpdate):
         raise HTTPException(404, f"Unknown provider '{provider}'")
 
     update_env_file({entry["model"]: payload.model.strip()})
+    _reload_providers()
     return {"ok": True}
 
 
 @router.post("/ollama/base-url")
 def set_ollama_base_url(payload: OllamaUrlUpdate):
     update_env_file({"OLLAMA_BASE_URL": payload.base_url.strip()})
+    _reload_providers()
     return {"ok": True}
 
 
@@ -187,7 +190,23 @@ def set_provider_base_url(provider: str, payload: OllamaUrlUpdate):
         raise HTTPException(404, f"Provider '{provider}' doesn't have a configurable base URL")
 
     update_env_file({env_key: payload.base_url.strip()})
+    _reload_providers()
     return {"ok": True}
+
+
+def _reload_providers() -> None:
+    """
+    update_env_file() re-reads .env into the settings cache, but the running
+    AIRouter was built once at startup from the old values - without this,
+    saving a key/model on the Providers screen would only take effect after
+    a restart.
+    """
+    try:
+        from main import rebuild_ai_router
+
+        rebuild_ai_router()
+    except ImportError:  # pragma: no cover - only when running outside main.py
+        pass
 
 
 def _provider_api_key(provider: str, settings: Settings) -> Optional[str]:

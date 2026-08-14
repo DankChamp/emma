@@ -50,9 +50,7 @@ Usage:
 import argparse
 import json
 import os
-import subprocess
 import sys
-import time
 
 import httpx
 
@@ -210,10 +208,10 @@ def cmd_telegram_users(args):
         return
     for u in users:
         priority = u.get('priority', 'normal')
-        notify = '✓' if u.get('notify_on_busy') else ' '
-        busy_msg = u.get('busy_message') or '-'
+        # chat_id arrives as an int from the DB; format it as text.
+        chat_id = str(u.get('chat_id') or '-')
         owner = 'OWNER' if u.get('is_owner') else ''
-        print(f"  {u['telegram_id']:12d}  {u['name']:20s}  label={u.get('label',''):15s}  role={u.get('role',''):10s}  priority={priority:8s}  notify={notify}  chat_id={u.get('chat_id') or '-':>10s}  {owner}")
+        print(f"  {u['telegram_id']:12d}  {u['name']:20s}  label={u.get('label',''):15s}  role={u.get('role',''):10s}  priority={priority:8s}  notify={'✓' if u.get('notify_on_busy') else ' '}  chat_id={chat_id:>10s}  {owner}")
 
 
 def cmd_telegram_messages(args):
@@ -234,7 +232,7 @@ def cmd_telegram_set_chatid(args):
 
 
 def cmd_notify_send(args):
-    data = _request("GET", f"/notifications/bot-status")
+    data = _request("GET", "/notifications/bot-status")
     if not data.get("running"):
         print("Bot is not running. Start it with: emma telegram start", file=sys.stderr)
         sys.exit(1)
@@ -250,16 +248,24 @@ def cmd_notify_send(args):
         print(f"User {args.telegram_id} has no chat_id set.", file=sys.stderr)
         sys.exit(1)
 
-    import httpx as _httpx
-    token = _request("GET", "/notifications/bot-status").get("_token", "")
+    # The bot token never leaves the server through the API; read it from
+    # .env directly and fail loudly instead of silently sending with an
+    # empty token (which Telegram answers with a bare 404).
+    token = ""
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
     try:
-        token_data = open(os.path.join(os.path.dirname(__file__), ".env")).read()
-        import re
-        m = re.search(r"TELEGRAM_BOT_TOKEN=(\S+)", token_data)
-        if m:
-            token = m.group(1)
-    except Exception:
-        pass
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                key, _, value = line.strip().partition("=")
+                if key.strip() == "TELEGRAM_BOT_TOKEN" and value:
+                    token = value.strip().strip('"\'')
+                    break
+    except OSError as exc:
+        print(f"Couldn't read {env_path} for the bot token: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if not token:
+        print("No TELEGRAM_BOT_TOKEN found in .env.", file=sys.stderr)
+        sys.exit(1)
 
     r = httpx.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": args.message, "parse_mode": "HTML"})
     if r.status_code == 200:
@@ -351,13 +357,25 @@ def cmd_selfcare_version(args):
 
 def cmd_voice_start(args):
     import subprocess as sp
-    import sys
+    from config import get_settings
+
     root = os.path.dirname(os.path.abspath(__file__))
     python = os.path.join(root, ".venv", "bin", "python")
     if not os.path.exists(python):
         python = "python3"
     wake = args.wake_word or "hey emma"
-    cmd = [python, os.path.join(root, "emma_voice.py"), "--wake-word", wake, "--backend-url", BASE_URL]
+    settings = get_settings()
+    backend_url = args.backend_url or settings.voice_backend_url
+    cmd = [
+        python,
+        os.path.join(root, "emma_voice.py"),
+        "--wake-word",
+        wake,
+        "--backend-url",
+        backend_url,
+    ]
+    if args.allow_remote_ai:
+        cmd.append("--allow-remote-ai")
     print(f"Starting voice assistant: {' '.join(cmd)}")
     proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.STDOUT, cwd=root)
     print(f"PID: {proc.pid}")
@@ -507,7 +525,14 @@ def build_parser() -> argparse.ArgumentParser:
     voice = sub.add_parser("voice", help="manage the voice assistant")
     voice_sub = voice.add_subparsers(dest="voice_command", required=True)
     p = voice_sub.add_parser("start", help="start listening for wake word")
-    p.add_argument("--wake-word", default="hey emma"); p.set_defaults(func=cmd_voice_start)
+    p.add_argument("--wake-word", default="hey emma")
+    p.add_argument("--backend-url", help="Voice backend URL (default: VOICE_BACKEND_URL)")
+    p.add_argument(
+        "--allow-remote-ai",
+        action="store_true",
+        help="Allow voice replies to use cloud providers if local models are unavailable",
+    )
+    p.set_defaults(func=cmd_voice_start)
     p = voice_sub.add_parser("stop", help="stop the voice assistant"); p.set_defaults(func=cmd_voice_stop)
 
     # contacts

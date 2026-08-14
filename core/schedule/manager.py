@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -26,6 +26,10 @@ from .models import TimeBlock
 from core.timeutil import local_now, local_today
 
 logger = logging.getLogger("emma.schedule")
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _normalise_time(s: str) -> str:
@@ -72,6 +76,10 @@ def format_time(dt: datetime) -> str:
 class TimetableManager:
     def __init__(self, db_path: Path, ai_router=None):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Shared connections: WAL + busy_timeout so concurrent
+        # writers (event loop, sweeps, Telegram) wait instead of 500ing.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.ai_router = ai_router
@@ -82,7 +90,7 @@ class TimetableManager:
         self._on_block_notify = callback
 
     def set_day(self, day: date, blocks: list[dict], create_reminders: bool = False) -> list[TimeBlock]:
-        now_dt = datetime.utcnow()
+        now_dt = _utc_now_naive()
         # Sort by start time before saving
         sorted_blocks = sorted(blocks, key=lambda b: b.get("start", "00:00"))
         # Detect overlaps
@@ -315,13 +323,14 @@ class TimetableManager:
     def _combine(day: date, hhmm: str) -> datetime:
         raw = hhmm.strip().upper()
         pm = "PM" in raw
+        am = "AM" in raw
         raw = raw.replace("AM", "").replace("PM", "").strip()
         parts = raw.split(":")
         hour = int(parts[0]) if parts and parts[0].isdigit() else 0
         minute = int(parts[1]) if len(parts) > 1 and parts[1][:2].isdigit() else 0
         if pm and hour < 12:
             hour += 12
-        if not pm and hour == 12:
+        if am and hour == 12:
             hour = 0
         hour = max(0, min(23, hour))
         minute = max(0, min(59, minute))
@@ -335,7 +344,7 @@ class TimetableManager:
         updated, note = insert_emergency(blocks, title, duration_minutes, now)
 
         self.conn.execute("DELETE FROM timetable WHERE day=?", (day.isoformat(),))
-        now_dt = datetime.utcnow()
+        now_dt = _utc_now_naive()
         for b in updated:
             self.conn.execute(
                 "INSERT INTO timetable (day, start, end, title, busy, created_at) VALUES (?, ?, ?, ?, ?, ?)",

@@ -10,7 +10,7 @@ only this file's routing table changes.
 """
 import logging
 from enum import Enum
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
@@ -132,6 +132,10 @@ class AIRouter:
     def _candidates(self, task: TaskType) -> list[AIProvider]:
         return self._routing_table.get(task, [self._ollama, self._groq, self._nim, self._aqua])
 
+    def _local_candidates(self, task: TaskType) -> list[AIProvider]:
+        preferred = self._candidates(task)
+        return [p for p in preferred if p in self._local_providers]
+
     async def run(
         self,
         task: TaskType,
@@ -139,6 +143,7 @@ class AIRouter:
         system: Optional[str] = None,
         model: Optional[str] = None,
         provider_name: Optional[str] = None,
+        local_only: bool = False,
     ) -> CompletionResult:
         """
         Run a completion, resiliently.
@@ -158,7 +163,13 @@ class AIRouter:
             provider = self.providers_by_name.get(provider_name)
             if provider is None:
                 raise RuntimeError(f"Unknown provider '{provider_name}'.")
+            if local_only and provider not in self._local_providers:
+                raise RuntimeError(
+                    f"Provider '{provider_name}' is not local. Voice local-only mode "
+                    "allows only Ollama or the generic local provider."
+                )
             kwargs = {"model": model} if model else {}
+            kwargs["task_type"] = task.value
             try:
                 return await provider.complete(prompt, system=system, **kwargs)
             except Exception as exc:  # noqa: BLE001 - surface a clean message
@@ -166,7 +177,7 @@ class AIRouter:
                     f"Provider '{provider_name}' couldn't answer: {self._describe_error(exc)}"
                 ) from exc
 
-        candidates = self._candidates(task)
+        candidates = self._local_candidates(task) if local_only else self._candidates(task)
         errors: list[str] = []
         tried_any = False
 
@@ -180,6 +191,7 @@ class AIRouter:
 
             tried_any = True
             kwargs = {"model": model} if model else {}
+            kwargs["task_type"] = task.value
             try:
                 result = await provider.complete(prompt, system=system, **kwargs)
                 if not (result.text and result.text.strip()):
@@ -198,6 +210,12 @@ class AIRouter:
                 continue
 
         if not tried_any and not errors:
+            if local_only:
+                raise RuntimeError(
+                    f"No local AI provider is available for '{task.value}'. Start Ollama "
+                    "or point Emma at a local OpenAI-compatible server. Voice local-only "
+                    "mode will not use cloud providers."
+                )
             raise RuntimeError(
                 f"No AI provider is available for '{task.value}'. Start Ollama, "
                 "point Emma at a local server, or add a working cloud API key "
@@ -205,6 +223,92 @@ class AIRouter:
             )
 
         detail = "; ".join(errors) if errors else "all providers unavailable"
+        raise RuntimeError(
+            f"Emma tried every provider for '{task.value}' but none could answer "
+            f"({detail}). Check your API keys and models on the Providers screen."
+        )
+
+    async def stream(
+        self,
+        task: TaskType,
+        prompt: str,
+        system: Optional[str] = None,
+        model: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        local_only: bool = False,
+    ) -> AsyncIterator[str]:
+        """
+        Run a completion as a stream of text chunks.
+
+        Same routing semantics as ``run()``, with one difference forced by
+        streaming: once a provider starts answering we're committed to it -
+        a failure mid-stream is surfaced as an error, never silently
+        re-routed, because the user may already be hearing partial output.
+        `provider_name` forces a specific provider (Manual mode).
+        """
+        if provider_name:
+            provider = self.providers_by_name.get(provider_name)
+            if provider is None:
+                raise RuntimeError(f"Unknown provider '{provider_name}'.")
+            if local_only and provider not in self._local_providers:
+                raise RuntimeError(
+                    f"Provider '{provider_name}' is not local. Voice local-only mode "
+                    "allows only Ollama or the generic local provider."
+                )
+            kwargs = {"model": model} if model else {}
+            kwargs["task_type"] = task.value
+            try:
+                async for piece in provider.stream(prompt, system=system, **kwargs):
+                    yield piece
+            except Exception as exc:  # noqa: BLE001 - surface a clean message
+                raise RuntimeError(
+                    f"Provider '{provider_name}' couldn't answer: {self._describe_error(exc)}"
+                ) from exc
+            return
+
+        candidates = self._local_candidates(task) if local_only else self._candidates(task)
+        errors: list[str] = []
+
+        for provider in candidates:
+            try:
+                if not await provider.is_available():
+                    continue
+            except Exception as exc:  # noqa: BLE001 - availability probe blew up
+                errors.append(f"{provider.name}: {self._describe_error(exc)}")
+                continue
+
+            kwargs = {"model": model} if model else {}
+            kwargs["task_type"] = task.value
+            yielded = False
+            try:
+                async for piece in provider.stream(prompt, system=system, **kwargs):
+                    yielded = True
+                    yield piece
+                return
+            except Exception as exc:  # noqa: BLE001
+                if yielded:
+                    # Committed: the caller already heard part of the answer.
+                    raise RuntimeError(
+                        f"Emma's reply via {provider.name} broke mid-stream: {self._describe_error(exc)}"
+                    ) from exc
+                # Died before producing a single chunk (bad key, server down,
+                # empty reply): like run(), try the next candidate.
+                errors.append(f"{provider.name}: {self._describe_error(exc)}")
+                continue
+
+        if not errors:
+            if local_only:
+                raise RuntimeError(
+                    f"No local AI provider is available for '{task.value}'. Start Ollama "
+                    "or point Emma at a local OpenAI-compatible server. Voice local-only "
+                    "mode will not use cloud providers."
+                )
+            raise RuntimeError(
+                f"No AI provider is available for '{task.value}'. Start Ollama, "
+                "point Emma at a local server, or add a working cloud API key "
+                "on the Providers screen."
+            )
+        detail = "; ".join(errors)
         raise RuntimeError(
             f"Emma tried every provider for '{task.value}' but none could answer "
             f"({detail}). Check your API keys and models on the Providers screen."

@@ -8,7 +8,8 @@ business logic lives here, only audio in/out and an HTTP call.
 
 Everything in this package runs fully on the local machine:
   - wake-word + command transcription: Vosk (offline speech recognition)
-  - reply playback: pyttsx3 (offline text-to-speech)
+  - reply playback: Chatterbox (voice-cloned neural TTS, sidecar venv),
+    Piper (neural fallback), or pyttsx3 (system voice)
 
 No audio ever leaves the machine except as text sent to whatever AI
 provider Emma's router picks for the reply (which can itself be a fully

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from api.deps import get_reminder_manager
 from core.reminders import ReminderManager
-from core.timeutil import local_now
+from core.timeutil import local_now, local_tz
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
 
@@ -34,7 +34,12 @@ def create_reminder(payload: ReminderCreate,
     if not payload.message.strip():
         raise HTTPException(400, "Reminder message is required")
     if payload.trigger_at is not None:
+        # The sweep compares against naive local time; an offset-aware
+        # trigger_at ("2026-08-13T15:00:00+05:30") would otherwise raise
+        # TypeError in check_due and stall every reminder from then on.
         trigger = payload.trigger_at
+        if trigger.tzinfo is not None:
+            trigger = trigger.astimezone(local_tz()).replace(tzinfo=None)
     elif payload.in_minutes is not None:
         if payload.in_minutes <= 0:
             raise HTTPException(400, "in_minutes must be positive")

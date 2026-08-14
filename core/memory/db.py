@@ -53,5 +53,11 @@ CREATE INDEX IF NOT EXISTS idx_conversation_session ON conversation_memory(sessi
 def get_connection(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # WAL lets readers and the writer proceed concurrently (the event loop,
+    # the sweeps, Telegram callbacks and the sync endpoints touch the same
+    # tables), and busy_timeout turns "database is locked" 500s into a short
+    # wait instead.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(SCHEMA)
     return conn

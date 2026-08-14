@@ -17,11 +17,11 @@ vLLM with --api-key) want *something* in the Authorization header, so we
 always send one - "not-needed" if the user hasn't set one - rather than
 omitting the header.
 """
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
-from .base import AIProvider, CompletionResult
+from .base import AIProvider, CompletionResult, _openai_stream
 
 
 class LocalGenericProvider(AIProvider):
@@ -90,6 +90,29 @@ class LocalGenericProvider(AIProvider):
 
         text = data["choices"][0]["message"]["content"]
         return CompletionResult(text=text, provider=self.name, model=model, raw=data)
+
+    async def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> AsyncIterator[str]:
+        if not self.base_url:
+            raise RuntimeError("Local provider called with no base URL configured")
+
+        model = kwargs.get("model", self.default_model)
+        if not model:
+            raise RuntimeError(
+                "No model set for the local provider. Set LOCAL_DEFAULT_MODEL "
+                "or pick one from the Providers screen."
+            )
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {"model": model, "messages": messages, "stream": True}
+
+        async for piece in _openai_stream(
+            f"{self.base_url}/v1/chat/completions", self._headers(), payload
+        ):
+            yield piece
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key or 'not-needed'}"}

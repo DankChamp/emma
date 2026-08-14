@@ -9,18 +9,22 @@ handful of *long-lived* singletons that must outlive a single request: the
 scheduler, the Telegram bot, and the managers the bot + scheduler reach into.
 Everything else stays per-request (see api/deps.py). No business logic here.
 """
-import asyncio
 import logging
+import os
+import secrets
 import time
-from datetime import date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from jose import jwt, JWTError
+from passlib.context import CryptContext
 
 from api.routes import appointments, chat, memory, notifications, planning, profile, projects, reminders, schedule, status, selfcare, tasks, facts, ingest
 from api.routes import settings as settings_routes
@@ -50,15 +54,53 @@ hf_backup.restore()
 
 TZ = ZoneInfo(settings.tz)
 
+# ---- Auth Configuration ----
+# JWT secret for session tokens (rotated on startup if not set in env)
+JWT_SECRET = os.environ.get("EMMA_JWT_SECRET") or secrets.token_urlsafe(32)
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24 * 30  # 30 days
+
+# Password hashing for web_password - use argon2 if available, fallback to PBKDF2
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
+    _HAS_PASSLIB = True
+except Exception:
+    import hashlib
+    import hmac
+    _HAS_PASSLIB = False
+    pwd_context = None
+
 def _local_to_utc(dt: datetime) -> datetime:
     """Convert a local naive datetime to UTC naive for APScheduler."""
     return dt.replace(tzinfo=TZ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _utc_now_naive() -> datetime:
+    """UTC timestamp kept naive because APScheduler jobs here use naive UTC."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 scheduler = AsyncIOScheduler()
 
 # ---- Long-lived singletons ----
 busy_mode = BusyModeManager(settings.busy_mode_db_path)
 ai_router = AIRouter(settings)
+
+
+def rebuild_ai_router() -> AIRouter:
+    """
+    Rebuild the provider stack from the current .env so saved settings take
+    effect without a restart. Reassigns the module-level `ai_router`, which
+    every consumer picks up via `from main import ai_router`, and re-points
+    the singletons that captured the old router (Telegram, the timetable).
+    """
+    global ai_router, settings
+    settings = get_settings()
+    ai_router = AIRouter(settings)
+    telegram._ai_router = ai_router
+    timetable.ai_router = ai_router
+    return ai_router
+
 profile_mgr = ProfileManager(settings.profile_db_path)
 task_mgr = TaskManager(settings.tasks_db_path)
 memory_mgr = MemoryManager(settings.memory_db_path)
@@ -233,7 +275,6 @@ reg.register(Tool("share_fact", "Share a fact about the user with subordinate AI
 async def _luna_pull_context(**kw):
     from core.luna.client import LunaClient
     from core.memory import MemoryManager
-    from config import DATA_DIR
 
     client = LunaClient(settings.luna_api_url, settings.luna_api_key)
     history = await client.get_history()
@@ -259,7 +300,7 @@ async def _reminder_sweep() -> None:
         logger.warning("Reminder sweep failed: %s", exc)
 
 
-AUTO_BUSY_PREFIX = "📅 "
+AUTO_BUSY_PREFIX = "���� "
 
 async def _send_block_notification(title: str, block_start: datetime) -> None:
     """Called when a scheduled block's start time arrives."""
@@ -269,7 +310,7 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
         await notifications_mgr.broadcast_availability(is_busy=True, note=title)
     t = block_start.strftime("%H:%M")
     sent = await notifications_mgr.notify_owner(
-        f"⏰ {t} — {title}"
+        f"��� {t} — {title}"
     )
     if not sent:
         logger.warning("Block notification not delivered — owner has no chat_id yet.")
@@ -278,7 +319,7 @@ async def _send_block_notification(title: str, block_start: datetime) -> None:
 def _schedule_block_notification(title: str, block_start: datetime) -> None:
     """Queue a Telegram notification for the start of a future block."""
     utc_start = _local_to_utc(block_start)
-    if utc_start <= datetime.utcnow():
+    if utc_start <= _utc_now_naive():
         # Never fire reminders for blocks that already started.
         logger.info("Skipping block notification '%s' at %s — already in the past.",
                     title, block_start.strftime("%H:%M"))
@@ -443,14 +484,71 @@ async def _auto_build_daily_schedule() -> None:
         logger.warning("Auto schedule build failed: %s", exc)
 
 
+# ---- Auth Helpers ----
+def _hash_password(password: str) -> str:
+    """Hash a password using argon2/bcrypt or fallback to PBKDF2-SHA256."""
+    if _HAS_PASSLIB and pwd_context:
+        return pwd_context.hash(password)
+    # Fallback: PBKDF2-SHA256 with random salt
+    import secrets
+    salt = secrets.token_bytes(16)
+    hash_val = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return f"pbkdf2_sha256${salt.hex()}${hash_val.hex()}"
+
+def _verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash."""
+    if _HAS_PASSLIB and pwd_context:
+        return pwd_context.verify(plain_password, hashed_password)
+    # Fallback verification
+    try:
+        parts = hashed_password.split('$')
+        if len(parts) == 3 and parts[0] == 'pbkdf2_sha256':
+            salt = bytes.fromhex(parts[1])
+            hash_val = bytes.fromhex(parts[2])
+            computed = hashlib.pbkdf2_hmac('sha256', plain_password.encode(), salt, 100000)
+            return hmac.compare_digest(computed, hash_val)
+    except Exception:
+        pass
+    return False
+
+def _create_session_token(data: dict) -> str:
+    """Create a JWT session token."""
+    to_encode = data.copy()
+    expire = datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS)
+    to_encode.update({"exp": expire, "iat": datetime.now(UTC)})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def _decode_session_token(token: str) -> dict | None:
+    """Decode and validate a JWT session token."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+def _get_web_password_hash() -> str | None:
+    """Get the hashed web password from settings."""
+    if settings.web_password:
+        # Hash on first use if not already hashed
+        if not settings.web_password.startswith("$2b$"):
+            return _hash_password(settings.web_password)
+        return settings.web_password
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.start()
     await _schedule_block_sweep()
 
     # Plan today automatically if it's still empty, then keep it daily.
     if settings.auto_build_schedule:
-        await _auto_build_daily_schedule()
+        scheduler.add_job(
+            _auto_build_daily_schedule, "date",
+            run_date=_utc_now_naive() + timedelta(seconds=5),
+            id="auto-daily-schedule-startup", replace_existing=True,
+        )
         hour, minute = _auto_build_utc_cron()
         scheduler.add_job(
             _auto_build_daily_schedule, "cron",
@@ -489,15 +587,65 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Telegram bot failed to auto-start: %s", exc)
     yield
-    if telegram.is_running:
+    # Shutdown must survive a failing component: if, say, the Telegram
+    # updater errors out of its stop sequence, the scheduler would never be
+    # shut down and the final HF backup would silently skip - losing the
+    # last data writes on ephemeral hosts.
+    try:
+        # Unconditional: stop() itself guards on whether the Application was
+        # ever built, and must run even when polling never started.
         await telegram.stop()
-    scheduler.shutdown()
+    except Exception as exc:  # noqa: BLE001 - keep tearing down regardless
+        logger.warning("Telegram shutdown raised: %s", exc)
+    
+    # Properly remove all scheduled jobs before shutdown to prevent leaks
+    try:
+        job_ids = [
+            "reminder-sweep",
+            "schedule-block-sweep",
+            "hf-backup",
+            "auto-daily-schedule-startup",
+            "auto-daily-schedule",
+        ]
+        # Also remove any block notification jobs
+        for job in scheduler.get_jobs():
+            if job.id.startswith("block-"):
+                job_ids.append(job.id)
+        
+        for job_id in job_ids:
+            job = scheduler.get_job(job_id)
+            if job:
+                job.remove()
+                logger.debug("Removed scheduler job: %s", job_id)
+        
+        scheduler.shutdown(wait=False)
+    except Exception as exc:  # noqa: BLE001 - keep tearing down regardless
+        logger.warning("Scheduler shutdown raised: %s", exc)
     # Final snapshot; force=True waits out any in-flight periodic upload
     # instead of silently skipping (which would lose the last writes).
-    await hf_backup.upload(force=True)
+    try:
+        await hf_backup.upload(force=True)
+    except Exception as exc:  # noqa: BLE001 - already exiting; don't mask the rest
+        logger.warning("Final HF backup raised: %s", exc)
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+
+# ---- CORS Configuration ----
+# Allow credentials only for specific origins, not wildcard
+allowed_origins = ["http://localhost:8000", "http://127.0.0.1:8000"]
+# Add any additional origins from env
+if os.environ.get("EMMA_ALLOWED_ORIGINS"):
+    allowed_origins.extend([o.strip() for o in os.environ["EMMA_ALLOWED_ORIGINS"].split(",")])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Cookie"],
+    expose_headers=["Set-Cookie"],
+)
 
 app.include_router(schedule.router)
 app.include_router(chat.router)
@@ -593,19 +741,25 @@ def _check_login_lock(key: str) -> None:
         _login_attempts.pop(key, None)
 
 @app.post("/api/auth")
-def login(payload: LoginRequest, request: Request):
+def login(payload: LoginRequest, request: Request, response: Response):
     logger.info("login attempt — password set=%s", bool(settings.web_password))
     key = _login_key(request)
     _check_login_lock(key)
-    if settings.web_password and payload.password == settings.web_password:
+    
+    password_hash = _get_web_password_hash()
+    if password_hash and _verify_password(payload.password, password_hash):
         _login_attempts.pop(key, None)
+        # Create JWT session token
+        token = _create_session_token({"sub": "user", "type": "web"})
         response = JSONResponse({"ok": True})
         response.set_cookie(
-            "emma_token",
-            payload.password,
+            "emma_session",
+            token,
             httponly=True,
+            secure=False,  # Set to True in production with HTTPS
             samesite="lax",
             path="/",
+            max_age=JWT_EXPIRY_HOURS * 3600,
         )
         return response
     rec = _login_attempts.setdefault(key, {"fails": 0, "locked_until": 0})
@@ -622,20 +776,36 @@ def login(payload: LoginRequest, request: Request):
     logger.warning("login failed — wrong password (ip=%s, fails=%s)", key, rec["fails"])
     raise HTTPException(401, f"Wrong password. {left} attempt(s) left")
 
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("emma_session", path="/")
+    return response
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     if not settings.web_password:
         return await call_next(request)
     # Public paths: the login page itself, its endpoint, health + root status
-    if request.url.path in ("/", "/health", "/api/auth", "/login", "/login/"):
+    if request.url.path in ("/", "/health", "/api/auth", "/api/auth/logout", "/login", "/login/"):
         return await call_next(request)
-    # Check Authorization header
+    # Check Authorization header for Bearer token (JWT)
     auth = request.headers.get("Authorization", "")
-    if auth == f"Bearer {settings.web_password}":
-        return await call_next(request)
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):]
+        payload = _decode_session_token(token)
+        if payload:
+            request.state.user = payload
+            return await call_next(request)
     # Check cookie (set after successful login)
-    if request.cookies.get("emma_token") == settings.web_password:
-        return await call_next(request)
+    token = request.cookies.get("emma_session")
+    if token:
+        payload = _decode_session_token(token)
+        if payload:
+            request.state.user = payload
+            return await call_next(request)
     # Normal pages are only reachable when authorized; otherwise bounce to login
     if request.url.path.startswith("/ui/"):
         return RedirectResponse("/login/", status_code=302)

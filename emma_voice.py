@@ -72,12 +72,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Emma's wake-word voice front end.")
     parser.add_argument("--wake-word", help='Override the wake phrase (default: from .env, "hey emma")')
     parser.add_argument("--backend-url", help="Override Emma's backend URL")
+    parser.add_argument(
+        "--allow-remote-ai",
+        action="store_true",
+        help="Allow voice replies to use cloud providers if local models are unavailable",
+    )
     parser.add_argument("--device", help="Microphone device name or index")
-    parser.add_argument("--engine", choices=["auto", "piper", "pyttsx3"], help="TTS engine (default: from .env, 'auto')")
+    parser.add_argument("--engine", choices=["auto", "chatterbox", "piper", "pyttsx3"], help="TTS engine (default: from .env, 'auto')")
+    parser.add_argument("--chatterbox-reference", help="~10s WAV of the voice Emma should be cloned from")
+    parser.add_argument("--chatterbox-variant", choices=["turbo", "nano"], help="Chatterbox model: 350M turbo or 110M nano (default: from .env, 'turbo')")
     parser.add_argument("--piper-model", help="Piper voice model name or .onnx path (default: auto-pick feminine)")
     parser.add_argument("--length-scale", type=float, help="Piper pacing: 1.0 natural, >1 slower, <1 faster")
     parser.add_argument("--voice", help="Fallback system-voice name substring (pyttsx3 only)")
     parser.add_argument("--no-ack", action="store_true", help="Skip the short spoken acknowledgement")
+    parser.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="Skip the intent gate and always answer after the wake word",
+    )
     parser.add_argument(
         "--no-barge-in",
         action="store_true",
@@ -113,11 +125,15 @@ def main() -> int:
         assistant = VoiceAssistant(
             backend_url=args.backend_url or settings.voice_backend_url,
             wake_word=wake_word,
+            local_only=settings.voice_local_only and not args.allow_remote_ai,
             vosk_model_path=settings.voice_vosk_model_path,
             input_device=args.device or settings.voice_input_device,
             tts_rate=settings.voice_tts_rate,
             tts_voice=args.voice or settings.voice_tts_voice,
             tts_engine=args.engine or settings.voice_tts_engine,
+            chatterbox_reference_wav=args.chatterbox_reference or settings.voice_chatterbox_reference_wav,
+            chatterbox_variant=args.chatterbox_variant or settings.voice_chatterbox_variant,
+            chatterbox_auto_fallback=settings.voice_chatterbox_auto_fallback,
             piper_model_path=args.piper_model or settings.voice_piper_model_path,
             piper_length_scale=args.length_scale if args.length_scale is not None else settings.voice_piper_length_scale,
             piper_noise_scale=settings.voice_piper_noise_scale,
@@ -126,12 +142,18 @@ def main() -> int:
             piper_speaker_id=settings.voice_piper_speaker_id,
             command_timeout=settings.voice_command_timeout_seconds,
             silence_seconds=settings.voice_silence_seconds,
+            judge_enabled=settings.voice_judge_enabled and not args.no_judge,
+            stream_min_chars=settings.voice_stream_min_chars,
+            stream_max_chars=settings.voice_stream_max_chars,
             speak_acknowledgement=not args.no_ack,
             barge_in=settings.voice_barge_in and not args.no_barge_in,
             on_state_change=lambda state: print(f"[{state}]"),
         )
     except VoiceDependencyError as exc:
         print(f"\nCan't start voice mode yet: {exc}", file=sys.stderr)
+        return 1
+    except RuntimeError as exc:
+        print(f"\nNo usable voice backend: {exc}", file=sys.stderr)
         return 1
 
     try:

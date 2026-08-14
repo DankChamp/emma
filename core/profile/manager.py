@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS profile (
 class ProfileManager:
     def __init__(self, db_path: Path):
         self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # Shared connections: WAL + busy_timeout so concurrent
+        # writers (event loop, sweeps, Telegram) wait instead of 500ing.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
 

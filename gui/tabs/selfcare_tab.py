@@ -3,15 +3,12 @@ SelfCareTab - GUI for diagnostics, auto-repair, updates, changelog, and system h
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -126,7 +123,6 @@ class SelfCareTab(QWidget):
         )
 
     def _on_diagnostics_success(self, report: dict):
-        import json
         self.log_output.clear()
         self.log_output.appendPlainText("=== DIAGNOSTICS REPORT ===")
         

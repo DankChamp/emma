@@ -1,6 +1,6 @@
 """Emergency task handling — reshuffle today's schedule around an urgent item."""
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from typing import Optional
 
 from .models import TimeBlock
@@ -57,20 +57,25 @@ def make_emergency_room(blocks: list[TimeBlock], duration_minutes: int = _DEFAUL
         start = start.replace(minute=(start.minute // 15) * 15)
         return start, start + timedelta(minutes=duration_minutes), ""
 
+    prev_end = now
     for block in future_blocks:
         block_duration = (block.end - block.start).total_seconds() / 60
         if block_duration >= duration_minutes + _MIN_SLOT_MINUTES:
-            split_point = block.start + timedelta(minutes=_MIN_SLOT_MINUTES)
             note = f"'{block.title}' shortened to make room"
             return block.start, block.start + timedelta(minutes=duration_minutes), note
 
-        gap_before = (block.start - max(now, future_blocks[0].start if future_blocks else now)).total_seconds() / 60 if future_blocks else 0
+        # Gap between the previous busy block's end and this one's start.
+        # Using the *previous* block (not the first) keeps the gap from
+        # including earlier blocks' durations, which could otherwise place
+        # the emergency inside a busy block.
+        gap_before = (block.start - prev_end).total_seconds() / 60
         if gap_before >= _MIN_SLOT_MINUTES:
             combined = block_duration + gap_before
             if combined >= duration_minutes:
-                note = f"Blocks compressed to make room"
+                note = "Blocks compressed to make room"
                 start = block.start - timedelta(minutes=min(gap_before, duration_minutes))
                 return start, start + timedelta(minutes=duration_minutes), note
+        prev_end = max(prev_end, block.end)
 
     last_block = future_blocks[-1]
     day_end = datetime.combine(now.date(), time(23, 0))
@@ -95,9 +100,10 @@ def insert_emergency(blocks: list[TimeBlock], title: str,
         result = make_emergency_room(blocks, duration_minutes, now)
         if result is None:
             return blocks, "Could not find room for emergency task"
-        slot, _, note = result
-
-    start, end = slot
+        # make_emergency_room returns (start, end, note).
+        start, end, note = result
+    else:
+        start, end = slot
 
     emergency_block = TimeBlock(
         id=None,
@@ -109,7 +115,30 @@ def insert_emergency(blocks: list[TimeBlock], title: str,
         created_at=datetime.utcnow(),
     )
 
-    updated = [b for b in blocks if not b.busy or b.end <= now or b.start >= end]
+    updated = []
+    for b in blocks:
+        if not b.busy or b.end <= now:
+            updated.append(b)
+            continue
+        if b.end <= start or b.start >= end:
+            # Completely before the emergency, or completely after it: keep.
+            updated.append(b)
+            continue
+        # Overlaps the emergency. When a block was "shortened to make room"
+        # it must not silently vanish: keep whatever usable tail remains
+        # after the emergency instead of deleting the whole task.
+        if b.end - end >= timedelta(minutes=_MIN_SLOT_MINUTES):
+            updated.append(
+                TimeBlock(
+                    id=b.id,
+                    day=b.day,
+                    start=end,
+                    end=b.end,
+                    title=b.title,
+                    busy=True,
+                    created_at=b.created_at,
+                )
+            )
     updated.append(emergency_block)
     updated.sort(key=lambda b: b.start)
 

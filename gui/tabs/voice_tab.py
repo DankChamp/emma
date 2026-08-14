@@ -10,11 +10,12 @@ the voice assistant just terminates that subprocess.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config import get_settings
 from gui import theme
 from gui.api_client import EmmaClient
 
@@ -44,10 +46,10 @@ class VoiceTab(QWidget):
 
         hint = QLabel(
             "Runs emma_voice.py as a background process. Say the wake word, then your "
-            "command - Emma answers out loud in a natural feminine voice. Fully offline: "
-            "wake-word and speech recognition run locally (Vosk), and replies are spoken "
-            "locally with a neural voice (Piper). For the best voice, run once: "
-            "python voice/download_voice.py"
+            "command - Emma answers out loud. Everything runs locally: wake-word and speech "
+            "recognition via Vosk, and replies spoken by Chatterbox (a voice-cloned neural voice) "
+            "when a reference voice is configured, else Piper. For the best voice: "
+            "python voice/check_reference.py your-sample.wav"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 12px;")
@@ -68,6 +70,42 @@ class VoiceTab(QWidget):
         row.addWidget(self.stop_btn)
         layout.addLayout(row)
 
+        cfg_row = QHBoxLayout()
+        cfg_row.addWidget(QLabel("Voice backend:"))
+        self.backend_edit = QLineEdit(get_settings().voice_backend_url)
+        self.backend_edit.setPlaceholderText("http://127.0.0.1:8000")
+        self.backend_edit.setToolTip(
+            "Voice uses this backend instead of the GUI's web URL, so it can stay local "
+            "even when the GUI is pointed at Render."
+        )
+        cfg_row.addWidget(self.backend_edit, stretch=1)
+        cfg_row.addWidget(QLabel("TTS engine:"))
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItems(["auto", "chatterbox", "piper", "pyttsx3"])
+        self.engine_combo.setCurrentText("auto")
+        cfg_row.addWidget(self.engine_combo)
+        layout.addLayout(cfg_row)
+
+        voice_row = QHBoxLayout()
+        self.reference_edit = QLineEdit()
+        self.reference_edit.setPlaceholderText("~10s WAV of the voice to clone (chatterbox)")
+        voice_row.addWidget(QLabel("Reference voice:"))
+        voice_row.addWidget(self.reference_edit, stretch=1)
+        self.local_only_check = QCheckBox("Local AI only")
+        self.local_only_check.setChecked(get_settings().voice_local_only)
+        self.local_only_check.setToolTip(
+            "Use only Ollama or the generic local provider for voice replies; never fall back to cloud."
+        )
+        voice_row.addWidget(self.local_only_check)
+        self.judge_check = QCheckBox("Intent gate")
+        self.judge_check.setChecked(True)
+        self.judge_check.setToolTip(
+            "After the wake word, Emma decides whether the utterance is really "
+            "addressed to her before speaking."
+        )
+        voice_row.addWidget(self.judge_check)
+        layout.addLayout(voice_row)
+
         self.status_label = QLabel("Not running.")
         self.status_label.setStyleSheet(f"color: {theme.TEXT_DIM};")
         layout.addWidget(self.status_label)
@@ -82,6 +120,7 @@ class VoiceTab(QWidget):
             return
 
         wake_word = self.wake_word_edit.text().strip() or "hey emma"
+        backend_url = self.backend_edit.text().strip() or "http://127.0.0.1:8000"
 
         self.process = QProcess(self)
         self.process.setWorkingDirectory(str(EMMA_ROOT))
@@ -95,8 +134,17 @@ class VoiceTab(QWidget):
             "--wake-word",
             wake_word,
             "--backend-url",
-            self.client.base_url,
+            backend_url,
+            "--engine",
+            self.engine_combo.currentText(),
         ]
+        if not self.local_only_check.isChecked():
+            args.append("--allow-remote-ai")
+        reference = self.reference_edit.text().strip()
+        if reference:
+            args += ["--chatterbox-reference", reference]
+        if not self.judge_check.isChecked():
+            args.append("--no-judge")
         self.log.clear()
         self.process.start(python, args)
 

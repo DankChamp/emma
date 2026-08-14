@@ -14,7 +14,7 @@ import queue
 import time
 from typing import Optional
 
-from .matcher import contains_wake_word
+from .matcher import tail_after_wake_word
 
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 4000  # ~0.25s of int16 mono audio per block at 16kHz
@@ -112,17 +112,23 @@ class WakeWordListener:
         self.wake_word = wake_word
         self.device = device or None
 
-    def wait_for_wake_word(self, stop_check=None) -> bool:
+    def wait_for_wake_word(self, stop_check=None) -> tuple[bool, str]:
         """
         Streams mic audio through Vosk until the wake phrase is detected.
         `stop_check`, if given, is a zero-arg callable polled between reads
         so callers (e.g. the GUI's Stop button, or the barge-in watcher that
         listens *while Emma is speaking*) can cancel listening.
 
-        Returns True if the wake word was actually heard, False if listening
-        was cancelled via `stop_check`. The distinction matters for barge-in:
-        the watcher thread only cuts Emma off when the phrase was genuinely
-        heard, not when the main loop tells it to stand down.
+        Returns ``(True, tail)`` when the wake word was heard, where ``tail``
+        is any text spoken after the phrase in the same utterance ("hey emma
+        what time is it" -> "what time is it"). Without it, saying the wake
+        word and the command in one breath would drop the command: this
+        recognizer is abandoned the moment the phrase is heard, and the fresh
+        one that records the command starts from silence. Returns
+        ``(False, "")`` when listening was cancelled via `stop_check`. The
+        distinction matters for barge-in: the watcher thread only cuts Emma
+        off when the phrase was genuinely heard, not when the main loop tells
+        it to stand down.
         """
         vosk = _require_vosk()
         recognizer = vosk.KaldiRecognizer(self.model, SAMPLE_RATE)
@@ -130,7 +136,7 @@ class WakeWordListener:
         with _MicStream(self.device) as mic:
             while True:
                 if stop_check is not None and stop_check():
-                    return False
+                    return False, ""
                 data = mic.read(timeout=0.3)
                 if data is None:
                     continue
@@ -140,8 +146,40 @@ class WakeWordListener:
                 else:
                     text = json.loads(recognizer.PartialResult()).get("partial", "")
 
-                if text and contains_wake_word(text, self.wake_word):
-                    return True
+                tail = tail_after_wake_word(text, self.wake_word) if text else None
+                if tail is None:
+                    continue
+
+                # Heard! Draining the rest of the utterance lets the words
+                # after the wake phrase survive; without it they are dropped
+                # with the abandoned recognizer. Bounded so barge-in cuts are
+                # never delayed by more than ~2.5s.
+                tail_bits = [tail] if tail else []
+                deadline = time.monotonic() + 2.5
+                last_partial_at = time.monotonic()
+                while time.monotonic() < deadline:
+                    if stop_check is not None and stop_check():
+                        break
+                    data = mic.read(timeout=0.3)
+                    if data is None:
+                        continue
+                    now = time.monotonic()
+                    if recognizer.AcceptWaveform(data):
+                        final_text = json.loads(recognizer.Result()).get("text", "")
+                        final_tail = tail_after_wake_word(final_text, self.wake_word)
+                        if final_tail is not None:
+                            tail_bits.append(final_tail)
+                        elif final_text:
+                            tail_bits.append(final_text)
+                        break  # the utterance ended; the final result is authoritative
+                    partial = json.loads(recognizer.PartialResult()).get("partial", "")
+                    if partial:
+                        last_partial_at = now
+                        partial_tail = tail_after_wake_word(partial, self.wake_word)
+                        tail_bits = [partial_tail if partial_tail is not None else partial]
+                    elif now - last_partial_at > 0.8:
+                        break  # recognizer went silent -> the utterance is over
+                return True, " ".join(bit for bit in tail_bits if bit).strip()
 
     def capture_command(self, max_seconds: float = 8.0, silence_seconds: float = 1.2) -> str:
         """

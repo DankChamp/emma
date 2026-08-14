@@ -67,12 +67,18 @@ URL as an argument (or set `EMMA_GUI_BASE_URL`) if the backend runs elsewhere.
 and Emma answers out loud in a natural, feminine voice. Same architecture as
 everything else: it's just another HTTP client of the API, doing audio
 in/out and nothing else. Everything runs on your machine; no audio is ever
-sent anywhere except as text, to whichever AI provider the router picks.
+sent anywhere. By default, voice replies are local-only too: the voice
+client asks the backend to use only Ollama or the generic local
+OpenAI-compatible provider, never Groq/NVIDIA/cloud fallback. This is
+separate from any Render web service you point the GUI or browser at.
 
-Emma's voice is **Piper**, a small neural TTS engine that runs on the CPU
-and sounds genuinely human - a big step up from the old robotic `espeak`
-fallback. The voice model is a local file; once downloaded, speech is fully
-offline.
+Emma's voice is **Chatterbox**, a voice-cloned neural TTS (Resemble AI's
+open-source Chatterbox-Turbo, 350M, with the 110M Nano as an automatic CPU
+fallback when Turbo runs slower than realtime). It clones a ~10s reference
+recording of the voice Emma should have - the most natural-sounding option
+by far. The older **Piper** neural voice remains as the next fallback, then
+the robotic system `espeak` voice. Voice models are local files; once
+downloaded, speech is fully offline.
 
 ```bash
 ./run.sh        # terminal 1: backend must already be running
@@ -88,22 +94,60 @@ One-time setup:
 3. Download a [Vosk](https://alphacephei.com/vosk/models) speech model for
    recognition - `vosk-model-small-en-us-0.15` (~40MB) is a good starting
    point. Unzip it and set `VOICE_VOSK_MODEL_PATH` in `.env` to that folder.
-4. Give Emma her voice: `python voice/download_voice.py` grabs a natural
-   feminine voice (**Amy**, ~63MB) into `voice/models/`, auto-detected at
-   runtime. Try `--list` for other curated voices (British "Jenny", the
-   crisp "hfc_female", the tiny fast "Kathleen", ...).
+4. Give Emma her Chatterbox voice (optional but recommended):
+   - **Reference sample**: a clean ~10s WAV of the voice you want Emma to
+     have. Validate it with `python voice/check_reference.py your.wav`,
+     copy it in, and set `VOICE_CHATTERBOX_REFERENCE_WAV` in `.env`.
+   - **Sidecar install** (once per machine): Chatterbox runs in its own
+     Python 3.11 virtualenv because the main one is newer than the pinned
+     torch supports:
+     ```bash
+     uv venv .venv-chatterbox --python 3.11
+     uv pip install --python .venv-chatterbox/bin/python chatterbox-tts
+     ```
+     The ~1-2GB of model weights download automatically on first run
+     (needs a HuggingFace token: set `HF_TOKEN` in `.env`).
+   With no reference WAV configured, `auto` quietly uses Piper instead -
+5. Piper fallback voice (only if you skip Chatterbox, or want offline
+   redundancy): `python voice/download_voice.py` grabs a natural feminine
+   voice (**Amy**, ~63MB) into `voice/models/`, auto-detected at runtime.
+   Try `--list` for other curated voices (British "Jenny", the crisp
+   "hfc_female", the tiny fast "Kathleen", ...).
+
+How a wake-up works now: "hey emma" -> Vosk transcribes your command ->
+Emma's **intent gate** decides whether you were actually talking to her
+(after the wake word doesn't guarantee it) -> her reply is **streamed**
+from the backend (SSE) and spoken sentence by sentence as it's generated,
+so she starts talking long before the whole answer exists. `[TOOL:...]`
+directives are never spoken. Barge-in still works: say the wake word over
+her speech to cut her off and give a new command.
 
 Useful flags/env vars:
 
 - `VOICE_WAKE_WORD` / `--wake-word "hey jarvis"` - change the wake phrase.
   Matching is fuzzy (`voice/matcher.py`) so it tolerates the odd
   mis-transcription instead of demanding an exact match.
+- `VOICE_BACKEND_URL` / `--backend-url` - backend used by voice mode.
+  Keep this at `http://127.0.0.1:8000` when the web UI is on Render but
+  voice should stay on your machine.
+- `VOICE_LOCAL_ONLY` - default `true`; voice uses only Ollama/local_generic
+  for replies and intent judging. Pass `--allow-remote-ai` only when you
+  explicitly want voice to use cloud providers.
 - `python emma_voice.py --list-devices` - find your microphone's name/index
   for `VOICE_INPUT_DEVICE` / `--device`.
 - `python emma_voice.py --list-voices` - show installed neural voices (and
   system fallback voices).
-- `VOICE_TTS_ENGINE` / `--engine` - `auto` (Piper if installed, else system),
-  `piper`, or `pyttsx3`.
+- `VOICE_TTS_ENGINE` / `--engine` - `auto` (Chatterbox if its reference and
+  sidecar are ready, else Piper, else system), `chatterbox`, `piper`, or
+  `pyttsx3`.
+- `VOICE_CHATTERBOX_REFERENCE_WAV` / `--chatterbox-reference` - the ~10s
+  clone sample (required for the chatterbox engine).
+- `VOICE_CHATTERBOX_VARIANT` / `--chatterbox-variant` - `turbo` (350M) or
+  `nano` (110M, ~3x realtime on 8 CPU cores). A slow CPU (Turbo slower
+  than realtime) auto-falls back to `nano`; disable with
+  `VOICE_CHATTERBOX_AUTO_FALLBACK=false`.
+- `VOICE_JUDGE_ENABLED` - set `false` to skip the intent gate and always
+  answer after the wake word.
 - `VOICE_PIPER_MODEL_PATH` / `--piper-model` - pick a specific voice by name
   or path when you have several installed.
 - `VOICE_PIPER_LENGTH_SCALE` / `--length-scale` - pacing (`1.0` natural, `>1`
@@ -244,4 +288,3 @@ emma/
   same wake-word + speech idea, just running on the ThinkPad's own mic and
   speakers instead of a standalone board)
 - ChromaDB / semantic recall — an additional memory tier for fuzzy retrieval
-
