@@ -526,13 +526,19 @@ def _decode_session_token(token: str) -> dict | None:
     except JWTError:
         return None
 
+_web_password_hash: str | None = None
+
 def _get_web_password_hash() -> str | None:
     """Get the hashed web password from settings."""
+    global _web_password_hash
     if settings.web_password:
-        # Hash on first use if not already hashed
-        if not settings.web_password.startswith("$2b$"):
-            return _hash_password(settings.web_password)
-        return settings.web_password
+        if _web_password_hash is None:
+            # Hash on first use if not already hashed
+            if not settings.web_password.startswith("$2b$"):
+                _web_password_hash = _hash_password(settings.web_password)
+            else:
+                _web_password_hash = settings.web_password
+        return _web_password_hash
     return None
 
 
