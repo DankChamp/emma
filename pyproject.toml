@@ -4,11 +4,11 @@ version = "0.1.0"
 description = "Personal AI assistant with scheduling, memory, and voice"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
-    "pydantic>=2.8",
-    "pydantic-settings>=2.4",
-    "httpx>=0.27",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.3",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.15.0",
+    "httpx>=0.28.1",
     "apscheduler>=3.10",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
