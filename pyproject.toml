@@ -32,7 +32,7 @@ voice = [
     "sounddevice>=0.4.6",
     "numpy>=1.26",
     "piper-tts>=1.4",
-    "pyttsx3>=2.90",
+    "pyttsx3>=2.99",
 ]
 telegram = [
     "python-telegram-bot>=22.8",
