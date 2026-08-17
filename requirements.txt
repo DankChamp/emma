@@ -9,7 +9,7 @@ passlib[bcrypt]>=1.7.4
 
 # --- Desktop GUI (gui/) ---
 PySide6>=6.7
-requests>=2.32
+requests>=2.34.2
 
 # --- Voice (voice/) - wake word + offline speech, see the Voice section of README.md ---
 # All optional: only needed if you're running emma_voice.py.
