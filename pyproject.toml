@@ -29,7 +29,7 @@ gui = [
 ]
 voice = [
     "vosk>=0.3.45",
-    "sounddevice>=0.4.6",
+    "sounddevice>=0.5.5",
     "numpy>=1.26",
     "piper-tts>=1.4",
     "pyttsx3>=2.90",
