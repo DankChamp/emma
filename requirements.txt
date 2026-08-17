@@ -16,7 +16,7 @@ requests>=2.32
 vosk>=0.3.45          # offline speech recognition (wake word + command STT)
 sounddevice>=0.4.6    # microphone capture + speaker playback
 numpy>=1.26           # audio buffer math
-piper-tts>=1.4        # natural neural feminine voice (offline, CPU) - fallback TTS
+piper-tts>=1.6.1        # natural neural feminine voice (offline, CPU) - fallback TTS
 pyttsx3>=2.90         # fallback text-to-speech (SAPI5 / NSSpeech / espeak-ng)
 # NOTE: the primary Chatterbox-Turbo voice does NOT install here. It needs
 # Python 3.11 (the pinned torch has no wheels for this project's newer
