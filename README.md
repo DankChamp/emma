@@ -1,5 +1,16 @@
 # Emma — Base Architecture
 
+<div align="center">
+
+[![CI](https://github.com/DankChamp/emma/actions/workflows/ci.yml/badge.svg)](https://github.com/DankChamp/emma/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/DankChamp/emma/actions/workflows/codeql.yml/badge.svg)](https://github.com/DankChamp/emma/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-00FF9C.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Void Linux](https://img.shields.io/badge/Void_Linux-runit%20%2B%20XBPS-1c1c1c?logo=linux&logoColor=white)](https://voidlinux.org)
+
+</div>
+
 This is Emma: not a chatbot, an operating system for daily life, with the
 LLM as just one of its tools.
 
@@ -288,3 +299,27 @@ emma/
   same wake-word + speech idea, just running on the ThinkPad's own mic and
   speakers instead of a standalone board)
 - ChromaDB / semantic recall — an additional memory tier for fuzzy retrieval
+
+---
+
+## Contributing
+
+PRs welcome! Please:
+
+1. Fork the repo & create a feature branch
+2. Run `ruff check . && mypy . && pytest -q` locally
+3. Follow the existing code style (ruff config in `pyproject.toml`)
+4. Add tests for new functionality
+5. Open a PR with a clear description
+
+```bash
+# Quick validation
+make lint      # ruff + mypy
+make test      # pytest
+```
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
