@@ -31,7 +31,7 @@ voice = [
     "vosk>=0.3.45",
     "sounddevice>=0.4.6",
     "numpy>=1.26",
-    "piper-tts>=1.4",
+    "piper-tts>=1.6.1",
     "pyttsx3>=2.90",
 ]
 telegram = [
